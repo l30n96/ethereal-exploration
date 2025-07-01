@@ -664,7 +664,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// World management loop - handle respawns and cleanup
+// World management loop - handle respawns, cleanup, and creature AI
 setInterval(() => {
     let respawnCount = 0;
     
@@ -672,6 +672,57 @@ setInterval(() => {
     worldObjects.forEach(obj => {
         if (obj.checkRespawn()) {
             respawnCount++;
+        }
+        
+        // Update creature AI - make them flee from players
+        if ((obj.type === 'spaceCreature' || obj.type === 'rare') && obj.available) {
+            let closestPlayer = null;
+            let closestDistance = Infinity;
+            
+            // Find closest player
+            for (const [id, player] of Object.entries(players)) {
+                const distance = Math.sqrt(
+                    Math.pow(player.x - obj.x, 2) +
+                    Math.pow(player.y - obj.y, 2) +
+                    Math.pow(player.z - obj.z, 2)
+                );
+                
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestPlayer = player;
+                }
+            }
+            
+            // Make creature flee if player is too close
+            if (closestPlayer && closestDistance < WORLD_SETTINGS.creatureFleeDistance) {
+                const fleeSpeed = obj.type === 'spaceCreature' ? 2.0 : 1.5;
+                
+                // Calculate flee direction (away from player)
+                const fleeDir = {
+                    x: obj.x - closestPlayer.x,
+                    y: obj.y - closestPlayer.y,
+                    z: obj.z - closestPlayer.z
+                };
+                
+                // Normalize and apply flee speed
+                const length = Math.sqrt(fleeDir.x * fleeDir.x + fleeDir.y * fleeDir.y + fleeDir.z * fleeDir.z);
+                if (length > 0) {
+                    fleeDir.x = (fleeDir.x / length) * fleeSpeed;
+                    fleeDir.y = (fleeDir.y / length) * fleeSpeed * 0.5; // Less vertical movement
+                    fleeDir.z = (fleeDir.z / length) * fleeSpeed;
+                    
+                    // Update creature position
+                    obj.x += fleeDir.x;
+                    obj.y += fleeDir.y;
+                    obj.z += fleeDir.z;
+                    
+                    // Keep creatures within world bounds
+                    const halfWorld = WORLD_SETTINGS.worldSize / 2;
+                    obj.x = Math.max(-halfWorld, Math.min(halfWorld, obj.x));
+                    obj.z = Math.max(-halfWorld, Math.min(halfWorld, obj.z));
+                    obj.y = Math.max(-300, Math.min(300, obj.y));
+                }
+            }
         }
     });
     
@@ -693,7 +744,7 @@ setInterval(() => {
             delete players[id];
         }
     }
-}, 5000); // Check every 5 seconds
+}, 2000); // Check every 2 seconds for more responsive creature AI
 
 // Generate leaderboard
 function getLeaderboard() {
