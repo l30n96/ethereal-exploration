@@ -72,7 +72,7 @@ class Player {
 }
 
 // Get nearby players
-function getNearbyPlayers(excludeId, x, y, z, range = 500) { // Reduced from 1000 to 500
+function getNearbyPlayers(excludeId, x, y, z, range = 1000) { // Increased from 500 to 1000
     const nearby = [];
     for (const [id, player] of Object.entries(players)) {
         if (id === excludeId) continue;
@@ -84,14 +84,18 @@ function getNearbyPlayers(excludeId, x, y, z, range = 500) { // Reduced from 100
         );
         
         const excludedPlayerName = players[excludeId] ? players[excludeId].name : 'unknown';
-        console.log(`📏 Distance from ${excludedPlayerName} to ${player.name}: ${Math.round(distance)}`);
+        console.log(`📏 Distance from ${excludedPlayerName} to ${player.name}: ${Math.round(distance)} (range: ${range})`);
         
         if (distance <= range) {
             const playerData = player.toJSON();
             playerData.distance = Math.round(distance);
             nearby.push(playerData);
+            console.log(`✅ ${player.name} is within range - adding to nearby list`);
+        } else {
+            console.log(`❌ ${player.name} is too far (${Math.round(distance)} > ${range})`);
         }
     }
+    console.log(`📋 Total nearby players for ${excludedPlayerName}: ${nearby.length}`);
     return nearby;
 }
 
