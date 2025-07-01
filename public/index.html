@@ -1,4 +1,12 @@
-function updateOtherPlayers(players) {
+function getRadiationColor(radiationLevel) {
+            if (radiationLevel < 25) return 0x00ff00; // Green
+            if (radiationLevel < 50) return 0xffff00; // Yellow  
+            if (radiationLevel < 75) return 0xff8000; // Orange
+            if (radiationLevel < 90) return 0xff4000; // Red-orange
+            return 0xff0000; // Bright red for high radiation
+        }
+        
+        function updateOtherPlayers(players) {
             console.log('👥 Updating other players:', players.length);
             
             // Remove old players
@@ -964,17 +972,60 @@ function updateOtherPlayers(players) {
             return portal;
         }
         
+        function syncWorldObjects(serverObjects) {
+            console.log('🔄 Syncing world objects from server...');
+            
+            // Clear existing local objects
+            objects.forEach(obj => scene.remove(obj));
+            objects = [];
+            
+            // Create objects based on server data
+            serverObjects.forEach(objData => {
+                if (objData.available) {
+                    const obj = createObjectFromData(objData);
+                    if (obj) {
+                        scene.add(obj);
+                        objects.push(obj);
+                    }
+                }
+            });
+            
+            console.log(`✅ Synced ${objects.length} world objects`);
+        }
+        
         function updateNearbyObjects(serverObjects) {
-            // This function updates the visual state of nearby objects
-            // based on server data (like if they've been collected by others)
+            // Update positions of server-managed objects (for creature fleeing)
             serverObjects.forEach(serverObj => {
                 const localObj = objects.find(obj => obj.userData.serverId === serverObj.id);
-                if (localObj && !serverObj.available && localObj.visible) {
+                if (localObj && serverObj.available) {
+                    // Update position from server (creatures may have moved due to fleeing)
+                    localObj.position.set(serverObj.x, serverObj.y, serverObj.z);
+                    
+                    // Update original Y for animation
+                    if (localObj.userData.originalY !== undefined) {
+                        localObj.userData.originalY = serverObj.y;
+                    }
+                } else if (localObj && !serverObj.available && localObj.visible) {
                     // Object was collected by someone else - hide it locally
                     scene.remove(localObj);
                     const index = objects.indexOf(localObj);
                     if (index > -1) objects.splice(index, 1);
                     console.log(`👻 Object ${serverObj.type} removed - collected by someone else`);
+                }
+            });
+            
+            // Add any new objects that appeared
+            serverObjects.forEach(serverObj => {
+                if (serverObj.available) {
+                    const existingObj = objects.find(obj => obj.userData.serverId === serverObj.id);
+                    if (!existingObj) {
+                        const newObj = createObjectFromData(serverObj);
+                        if (newObj) {
+                            scene.add(newObj);
+                            objects.push(newObj);
+                            console.log(`✨ New object appeared: ${serverObj.type}`);
+                        }
+                    }
                 }
             });
         }
@@ -990,6 +1041,14 @@ function updateOtherPlayers(players) {
             kills = stats.kills || 0;
             deaths = stats.deaths || 0;
             nearbyPlayers = stats.nearbyPlayers || [];
+            
+            // Debug logging for radiation
+            if (radiationFromPlayers > 0 && Math.random() < 0.02) { // 2% chance to log
+                console.log(`☢️ Radiation update: Total=${Math.round(radiationLevel)}%, From players=${Math.round(radiationFromPlayers)}%, Nearby players=${nearbyPlayers.length}`);
+                nearbyPlayers.forEach(np => {
+                    console.log(`  - ${np.name}: ${np.distance}m away, ${np.radiationLevel}% radiation`);
+                });
+            }
             
             // Update HUD with server stats
             document.getElementById('score').textContent = score;
@@ -1120,7 +1179,9 @@ function updateOtherPlayers(players) {
                 html += '<div style="color: #ff6b6b; font-size: 11px; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 5px;">';
                 html += '⚠️ RADIATION SOURCES:<br>';
                 nearbyPlayers.forEach(np => {
-                    html += `${np.name}: ${np.distance}m (${np.radiationLevel}%)<br>`;
+                    const npRadiationColor = getRadiationColor(np.radiationLevel || 0);
+                    const npRadiationHex = npRadiationColor.toString(16).padStart(6, '0');
+                    html += `<span style="color: #${npRadiationHex}">${np.name}: ${np.distance}m (${np.radiationLevel}%)</span><br>`;
                 });
                 html += '</div>';
             }
