@@ -390,7 +390,7 @@ function generateWorld() {
 }
 
 // Get nearby players for competition
-function getNearbyPlayers(excludeId, x, y, z, range = 1000) {
+function getNearbyPlayers(excludeId, x, y, z, range = 2000) { // Increased range to 2000m for better visibility
     const nearby = [];
     const excludedPlayerName = players[excludeId] ? players[excludeId].name : 'unknown';
     
@@ -403,13 +403,18 @@ function getNearbyPlayers(excludeId, x, y, z, range = 1000) {
             Math.pow(player.z - z, 2)
         );
         
+        console.log(`📏 Distance from ${excludedPlayerName} to ${player.name}: ${Math.round(distance)} (range: ${range})`);
+        
         if (distance <= range) {
             const playerData = player.toJSON();
             playerData.distance = Math.round(distance);
             nearby.push(playerData);
+            console.log(`✅ ${player.name} is within range - adding to nearby list (radiation: ${player.radiationLevel}%)`);
+        } else {
+            console.log(`❌ ${player.name} is too far (${Math.round(distance)} > ${range})`);
         }
     }
-    
+    console.log(`📋 Total nearby players for ${excludedPlayerName}: ${nearby.length}`);
     return nearby;
 }
 
@@ -609,6 +614,11 @@ io.on('connection', (socket) => {
         // Get nearby players and objects
         const nearbyPlayers = getNearbyPlayers(socket.id, player.x, player.y, player.z);
         const nearbyObjects = getNearbyObjects(socket.id, player.x, player.y, player.z);
+        
+        // Debug logging for game state
+        if (Math.random() < 0.01) { // 1% chance to log
+            console.log(`🎮 Sending game state to ${player.name}: ${nearbyPlayers.length} players, ${nearbyObjects.length} objects, radiation: ${player.radiationLevel}% (${player.radiationFromPlayers}% from players)`);
+        }
         
         // Send game state back to this player
         socket.emit('game_state', {
