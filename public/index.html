@@ -265,12 +265,23 @@
                     nearbyPlayers: data.players ? data.players.length : 0,
                     totalPlayers: data.totalPlayers,
                     playerDots: data.playerDots ? data.playerDots.length : 0,
-                    yourPosition: data.yourPosition
+                    yourPosition: data.yourPosition,
+                    playersData: data.players
                 });
+                
+                // Log each player's details
+                if (data.players && data.players.length > 0) {
+                    console.log('👥 Player details received:');
+                    data.players.forEach(p => {
+                        console.log(`  - ${p.name}: (${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)}) distance: ${p.distance}m`);
+                    });
+                }
                 
                 if (data.players) {
                     updateOtherPlayers(data.players);
                     updatePlayerList(data.players);
+                } else {
+                    console.log('⚠️ No players data in game state');
                 }
                 
                 if (data.playerDots) {
@@ -378,23 +389,27 @@
         }
         
         function updatePlayerList(players) {
+            console.log('📝 Updating player list with', players.length, 'players');
             const playerList = document.getElementById('playerList');
             let html = '<div style="font-weight: bold; margin-bottom: 5px;">Other Players</div>';
             
-            if (players.length === 0) {
+            if (!players || players.length === 0) {
                 html += '<div style="opacity: 0.7; font-size: 11px;">No other players nearby</div>';
+                console.log('📝 No players to show in list');
             } else {
+                console.log('📝 Adding players to list:', players.map(p => p.name));
                 players.forEach(p => {
                     html += `
                         <div class="player-entry">
                             <span style="color: #${p.color.toString(16).padStart(6, '0')}">${p.name}</span>
-                            <span>${Math.round(p.distance)}m</span>
+                            <span>${p.distance}m away</span>
                         </div>
                     `;
                 });
             }
             
             playerList.innerHTML = html;
+            console.log('📝 Player list HTML updated:', html);
         }
         
         function updateRadar() {
