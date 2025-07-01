@@ -661,11 +661,28 @@ function getRadiationColor(radiationLevel) {
             });
             
             socket.on('game_state', (data) => {
+                console.log('🎮 Game state received:', {
+                    players: data.players?.length || 0,
+                    objects: data.objects?.length || 0,
+                    yourStats: data.yourStats,
+                    totalPlayers: data.totalPlayers
+                });
+                
                 if (!data) return;
                 
-                if (data.players) {
+                if (data.players && data.players.length > 0) {
+                    console.log('👥 Processing', data.players.length, 'nearby players:', data.players.map(p => `${p.name} (${p.distance}m, ${p.radiationLevel}%)`));
                     updateOtherPlayers(data.players);
                     updatePlayerList(data.players);
+                } else {
+                    console.log('👥 No nearby players');
+                    // Clear player list when no players nearby
+                    updatePlayerList([]);
+                    // Remove all other players from scene
+                    for (const [id, playerObj] of otherPlayers) {
+                        scene.remove(playerObj.mesh);
+                    }
+                    otherPlayers.clear();
                 }
                 
                 if (data.objects) {
@@ -673,6 +690,13 @@ function getRadiationColor(radiationLevel) {
                 }
                 
                 if (data.yourStats) {
+                    console.log('📊 Your stats update:', {
+                        radiation: data.yourStats.radiationLevel,
+                        radiationFromPlayers: data.yourStats.radiationFromPlayers,
+                        nearbyPlayers: data.yourStats.nearbyPlayers?.length || 0,
+                        kills: data.yourStats.kills,
+                        deaths: data.yourStats.deaths
+                    });
                     updatePlayerStats(data.yourStats);
                 }
                 
