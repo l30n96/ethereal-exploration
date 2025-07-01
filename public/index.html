@@ -273,8 +273,13 @@
             <div>Discoveries: <span id="discoveries">0</span></div>
             <div>Rare Items: <span id="rare">0</span></div>
             <div>Creatures Found: <span id="creatures">0</span></div>
+            <div>Kills: <span id="kills">0</span></div>
+            <div>Deaths: <span id="deaths">0</span></div>
             <div>Players Online: <span id="playerCount">1</span></div>
             <div style="color: #ff6b6b;">Radiation: <span id="radiation">0</span>%</div>
+            <div id="proximityWarning" style="color: #ff0000; font-weight: bold; display: none;">⚠️ PROXIMITY RADIATION!</div>
+            <div id="nearbyPlayersInfo" style="color: #ffd93d; font-size: 12px;"></div>
+        </div>ff6b6b;">Radiation: <span id="radiation">0</span>%</div>
         </div>
         
         <div class="player-list" id="playerList">
@@ -351,6 +356,8 @@
         let discoveries = 0;
         let rareItems = 0;
         let creaturesFound = 0;
+        let kills = 0;
+        let deaths = 0;
         let score = 0;
         let gameStarted = false;
         let socket;
@@ -360,12 +367,15 @@
         let audioContext, masterGain;
         let musicPlaying = false;
         let ambientOscillators = [];
+        let isDead = false;
         
         // Radiation system - CHANGE THESE VALUES TO ADJUST RADIATION
         let radiationLevel = 0;
         let maxRadiation = 100;
         let radiationRate = 0.02; // 🔧 RADIATION RATE: Lower = slower radiation buildup (0.02 = slow, 0.05 = fast)
         let lastJumpscareTime = 0;
+        let nearbyPlayerCount = 0;
+        let nearbyPlayers = [];
         
         // Scoring system
         const POINTS = {
@@ -548,9 +558,82 @@
                 }
             });
             
-            socket.on('leaderboard_update', (data) => {
-                console.log('🏆 Leaderboard update:', data.leaderboard);
-                updateLeaderboard(data.leaderboard);
+            socket.on('player_death', (data) => {
+                console.log('💀 Player death event:', data);
+                
+                if (data.victimId === playerId) {
+                    // You died
+                    isDead = true;
+                    gameStarted = false;
+                    deaths++;
+                    
+                    // Show death screen with PvP info
+                    document.getElementById('finalScore').textContent = score;
+                    document.getElementById('finalDiscoveries').textContent = discoveries;
+                    document.getElementById('finalRare').textContent = rareItems;
+                    document.getElementById('finalCreatures').textContent = creaturesFound;
+                    
+                    document.getElementById('deathScreen').style.display = 'flex';
+                    playDeathSound();
+                    
+                    addChatMessage('System', `💀 You died from radiation poisoning! Kills: ${kills}, Deaths: ${deaths}`);
+                    
+                    if (data.beneficiaries.length > 0) {
+                        const beneficiaryNames = data.beneficiaries.map(b => `${b.name} (-${b.radiationReduction}%)`).join(', ');
+                        addChatMessage('System', `🩸 Nearby players benefited: ${beneficiaryNames}`);
+                        showNotification(`💀 You died! ${data.beneficiaries.length} players near you got radiation reduction!`, 5000);
+                    }
+                } else {
+                    // Someone else died
+                    const victim = data.victim;
+                    addChatMessage('System', `💀 ${victim} died from radiation poisoning!`);
+                    
+                    if (data.beneficiaries.length > 0) {
+                        const youBenefited = data.beneficiaries.find(b => b.name === playerName);
+                        if (youBenefited) {
+                            // You benefited from their death!
+                            kills++;
+                            radiationLevel = youBenefited.newRadiation;
+                            showNotification(`🩸 ${victim} died near you! Radiation: -${youBenefited.radiationReduction}% (Kills: ${kills})`, 5000);
+                            addChatMessage('System', `🩸 You gained from ${victim}'s death! Radiation reduced to ${youBenefited.newRadiation}%`);
+                            playKillSound();
+                        } else {
+                            // Show who benefited
+                            const beneficiaryNames = data.beneficiaries.map(b => b.name).join(', ');
+                            addChatMessage('System', `🩸 ${beneficiaryNames} benefited from ${victim}'s death`);
+                        }
+                    }
+                }
+            });
+            
+            socket.on('player_respawn', (data) => {
+                console.log('🔄 Player respawn:', data);
+                
+                if (data.playerId === playerId) {
+                    // You respawned
+                    isDead = false;
+                    gameStarted = true;
+                    radiationLevel = 0;
+                    
+                    // Update position and rotation to match server spawn
+                    player.x = data.position.x;
+                    player.y = data.position.y;
+                    player.z = data.position.z;
+                    player.rotationX = data.rotation.x;
+                    player.rotationY = data.rotation.y;
+                    
+                    camera.position.set(player.x, player.y, player.z);
+                    camera.rotation.set(player.rotationX, player.rotationY, 0);
+                    
+                    // Hide death screen
+                    document.getElementById('deathScreen').style.display = 'none';
+                    
+                    showNotification(`🔄 Respawned near ${data.spawnedNear}! Watch your radiation levels!`, 4000);
+                    addChatMessage('System', `🔄 You respawned near ${data.spawnedNear}! Current radiation: 0%`);
+                } else {
+                    // Someone else respawned
+                    addChatMessage('System', `🔄 ${data.player} respawned near ${data.spawnedNear}`);
+                }
             });
             
             socket.on('chat_message', (data) => {
@@ -800,12 +883,36 @@
             rareItems = stats.rareItems;
             creaturesFound = stats.creatures;
             radiationLevel = stats.radiationLevel;
+            kills = stats.kills || 0;
+            deaths = stats.deaths || 0;
+            isDead = stats.isDead || false;
+            nearbyPlayerCount = stats.nearbyPlayerCount || 0;
+            nearbyPlayers = stats.nearbyPlayers || [];
             
             // Update HUD with server stats
-            document.getElementById('score').textContent = score;
-            document.getElementById('discoveries').textContent = discoveries;
-            document.getElementById('rare').textContent = rareItems;
-            document.getElementById('creatures').textContent = creaturesFound;
+            updateHUD();
+            
+            // Update proximity warning
+            updateProximityWarning();
+        }
+        
+        function updateProximityWarning() {
+            const proximityWarning = document.getElementById('proximityWarning');
+            const nearbyPlayersInfo = document.getElementById('nearbyPlayersInfo');
+            
+            if (nearbyPlayerCount > 0) {
+                proximityWarning.style.display = 'block';
+                
+                // Show info about nearby players
+                const playersText = nearbyPlayers.map(p => 
+                    `${p.name}: ${p.distance}m (${p.radiationLevel}%)`
+                ).join(', ');
+                nearbyPlayersInfo.textContent = `Nearby: ${playersText}`;
+                nearbyPlayersInfo.style.display = 'block';
+            } else {
+                proximityWarning.style.display = 'none';
+                nearbyPlayersInfo.style.display = 'none';
+            }
         }
         
         function updateLeaderboard(leaderboard) {
@@ -870,19 +977,108 @@
                     glowSphere.position.y = 15;
                     group.add(glowSphere);
                     
+                    // Radiation level indicator - floating text above player
+                    const radiationIndicator = createRadiationIndicator(playerData.radiationLevel);
+                    radiationIndicator.position.y = 25;
+                    group.add(radiationIndicator);
+                    
                     group.position.set(playerData.x, playerData.y, playerData.z);
+                    
+                    // Make dead players semi-transparent
+                    if (playerData.isDead) {
+                        group.children.forEach(child => {
+                            if (child.material) {
+                                child.material.transparent = true;
+                                child.material.opacity = 0.3;
+                            }
+                        });
+                    }
+                    
                     scene.add(group);
                     
                     playerObj = { mesh: group, data: playerData };
                     otherPlayers.set(playerData.id, playerObj);
                     
-                    showNotification(`👋 ${playerData.name} is ${playerData.distance}m away!`, 4000);
+                    showNotification(`👋 ${playerData.name} is ${playerData.distance}m away! (Radiation: ${Math.round(playerData.radiationLevel)}%)`, 4000);
                 } else {
-                    // Update existing player position
+                    // Update existing player position and radiation indicator
                     playerObj.mesh.position.set(playerData.x, playerData.y, playerData.z);
                     playerObj.data = playerData;
+                    
+                    // Update radiation indicator
+                    const radiationIndicator = playerObj.mesh.children[3]; // Radiation indicator is 4th child
+                    if (radiationIndicator) {
+                        updateRadiationIndicator(radiationIndicator, playerData.radiationLevel);
+                    }
+                    
+                    // Update transparency based on death status
+                    if (playerData.isDead !== playerObj.previouslyDead) {
+                        playerObj.mesh.children.forEach(child => {
+                            if (child.material) {
+                                child.material.transparent = true;
+                                child.material.opacity = playerData.isDead ? 0.3 : 1.0;
+                            }
+                        });
+                        playerObj.previouslyDead = playerData.isDead;
+                    }
                 }
             });
+        }
+        
+        function createRadiationIndicator(radiationLevel) {
+            // Create a simple plane with radiation text
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 32;
+            const context = canvas.getContext('2d');
+            
+            // Background
+            context.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            context.fillRect(0, 0, 128, 32);
+            
+            // Text
+            context.fillStyle = getRadiationColor(radiationLevel);
+            context.font = 'bold 14px Arial';
+            context.textAlign = 'center';
+            context.fillText(`${Math.round(radiationLevel)}%`, 64, 20);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.MeshBasicMaterial({ 
+                map: texture, 
+                transparent: true,
+                alphaTest: 0.1
+            });
+            const geometry = new THREE.PlaneGeometry(8, 2);
+            const plane = new THREE.Mesh(geometry, material);
+            
+            // Make it always face the camera
+            plane.rotation.y = Math.PI;
+            
+            return plane;
+        }
+        
+        function updateRadiationIndicator(indicator, radiationLevel) {
+            const canvas = indicator.material.map.image;
+            const context = canvas.getContext('2d');
+            
+            // Clear and redraw
+            context.clearRect(0, 0, 128, 32);
+            context.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            context.fillRect(0, 0, 128, 32);
+            
+            context.fillStyle = getRadiationColor(radiationLevel);
+            context.font = 'bold 14px Arial';
+            context.textAlign = 'center';
+            context.fillText(`${Math.round(radiationLevel)}%`, 64, 20);
+            
+            indicator.material.map.needsUpdate = true;
+        }
+        
+        function getRadiationColor(radiationLevel) {
+            if (radiationLevel < 30) return '#4ecdc4';
+            if (radiationLevel < 60) return '#ffd93d';
+            if (radiationLevel < 85) return '#ff6b6b';
+            return '#ff0000';
         }
         
         function updatePlayerDots(dots) {
@@ -1418,18 +1614,27 @@
         }
         
         function updatePlayer() {
-            if (!gameStarted || chatFocused) return;
+            if (!gameStarted || chatFocused || isDead) return;
             
             const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? 2.0 : 1.0;
             const lookSpeed = 0.03;
             
-            // Update survival time and radiation
+            // Update survival time
             const currentTime = Date.now();
             survivalTime = currentTime - gameStartTime;
-            radiationLevel += radiationRate;
             
-            if (radiationLevel >= maxRadiation) {
-                triggerRadiationDeath();
+            // Note: Radiation is now managed by server based on proximity to other players
+            // Local radiation rate only applies when no server connection
+            if (!socket || !socket.connected) {
+                radiationLevel += radiationRate;
+                if (radiationLevel >= maxRadiation) {
+                    triggerRadiationDeath();
+                    return;
+                }
+            } else if (radiationLevel >= maxRadiation) {
+                // Server will handle death, just disable local controls
+                gameStarted = false;
+                isDead = true;
                 return;
             }
             
@@ -1452,6 +1657,74 @@
             if (radiationLevel > 50) {
                 const glitchChance = (radiationLevel - 50) / 50 * 0.08;
                 if (Math.random() < glitchChance) {
+                    player.rotationX += (Math.random() - 0.5) * 0.2 * baseInterference;
+                    player.rotationY += (Math.random() - 0.5) * 0.2 * baseInterference;
+                }
+            }
+            
+            player.rotationX = Math.max(-Math.PI/2, Math.min(Math.PI/2, player.rotationX));
+            
+            camera.rotation.order = 'YXZ';
+            camera.rotation.y = player.rotationY;
+            camera.rotation.x = player.rotationX;
+            
+            // Movement
+            const forward = new THREE.Vector3(0, 0, -1);
+            const right = new THREE.Vector3(1, 0, 0);
+            const up = new THREE.Vector3(0, 1, 0);
+            forward.applyQuaternion(camera.quaternion);
+            right.applyQuaternion(camera.quaternion);
+            
+            const movement = new THREE.Vector3();
+            
+            if (keys['KeyW']) {
+                if (movementGlitch) {
+                    movement.addScaledVector(forward, -speed * 0.5);
+                } else {
+                    movement.addScaledVector(forward, speed);
+                }
+            }
+            if (keys['KeyS']) {
+                if (movementGlitch) {
+                    movement.addScaledVector(forward, speed * 0.5);
+                } else {
+                    movement.addScaledVector(forward, -speed);
+                }
+            }
+            if (keys['KeyA']) {
+                if (movementGlitch) {
+                    movement.addScaledVector(right, speed * 0.5);
+                } else {
+                    movement.addScaledVector(right, -speed);
+                }
+            }
+            if (keys['KeyD']) {
+                if (movementGlitch) {
+                    movement.addScaledVector(right, -speed * 0.5);
+                } else {
+                    movement.addScaledVector(right, speed);
+                }
+            }
+            if (keys['KeyQ']) movement.addScaledVector(up, speed);
+            if (keys['KeyE']) movement.addScaledVector(up, -speed);
+            
+            // Radiation drift
+            if (radiationLevel > 60) {
+                const drift = baseInterference * 0.1;
+                movement.x += (Math.random() - 0.5) * drift;
+                movement.y += (Math.random() - 0.5) * drift;
+                movement.z += (Math.random() - 0.5) * drift;
+            }
+            
+            player.x += movement.x;
+            player.y += movement.y;
+            player.z += movement.z;
+            
+            camera.position.set(player.x, player.y, player.z);
+            
+            checkInteractions();
+            updateHUD();
+        } {
                     player.rotationX += (Math.random() - 0.5) * 0.2 * baseInterference;
                     player.rotationY += (Math.random() - 0.5) * 0.2 * baseInterference;
                 }
@@ -2005,6 +2278,36 @@
             }
         }
         
+        function playKillSound() {
+            if (!audioContext) return;
+            try {
+                // Satisfying kill sound - ascending notes
+                const frequencies = [220, 330, 440, 550];
+                
+                frequencies.forEach((freq, i) => {
+                    setTimeout(() => {
+                        const osc = audioContext.createOscillator();
+                        const gain = audioContext.createGain();
+                        
+                        osc.frequency.setValueAtTime(freq, audioContext.currentTime);
+                        osc.type = 'triangle';
+                        
+                        gain.gain.setValueAtTime(0, audioContext.currentTime);
+                        gain.gain.linearRampToValueAtTime(0.15, audioContext.currentTime + 0.1);
+                        gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.8);
+                        
+                        osc.connect(gain);
+                        gain.connect(masterGain);
+                        
+                        osc.start();
+                        osc.stop(audioContext.currentTime + 0.8);
+                    }, i * 100);
+                });
+            } catch (e) {
+                console.warn('Kill sound error:', e);
+            }
+        }
+        
         function updateHUD() {
             document.getElementById('coords').textContent = 
                 `${Math.round(player.x)}, ${Math.round(player.y)}, ${Math.round(player.z)}`;
@@ -2016,19 +2319,24 @@
                                creaturesFound * POINTS.spaceCreature + 
                                currentSurvivalScore;
             
-            document.getElementById('score').textContent = currentScore;
+            document.getElementById('score').textContent = score; // Use server score if available
             document.getElementById('discoveries').textContent = discoveries;
             document.getElementById('rare').textContent = rareItems;
             document.getElementById('creatures').textContent = creaturesFound;
+            document.getElementById('kills').textContent = kills;
+            document.getElementById('deaths').textContent = deaths;
             document.getElementById('radiation').textContent = Math.round(radiationLevel);
             
             const radiationElement = document.getElementById('radiation');
             if (radiationLevel < 30) {
                 radiationElement.style.color = '#4ecdc4';
+                radiationElement.style.textShadow = 'none';
             } else if (radiationLevel < 60) {
                 radiationElement.style.color = '#ffd93d';
+                radiationElement.style.textShadow = 'none';
             } else if (radiationLevel < 85) {
                 radiationElement.style.color = '#ff6b6b';
+                radiationElement.style.textShadow = '0 0 5px #ff6b6b';
             } else {
                 radiationElement.style.color = '#ff0000';
                 radiationElement.style.textShadow = '0 0 10px #ff0000';
@@ -2037,14 +2345,24 @@
         
         function animate() {
             requestAnimationFrame(animate);
-            updatePlayer();
+            
+            if (!isDead) {
+                updatePlayer();
+            }
+            
             animateObjects();
             
-            // Simple animation for other players
+            // Simple animation for other players with radiation indicators always facing camera
             const time = Date.now() * 0.001;
             for (const [id, playerObj] of otherPlayers) {
                 if (playerObj.mesh) {
                     playerObj.mesh.position.y = playerObj.data.y + Math.sin(time * 2) * 0.5;
+                    
+                    // Make radiation indicator always face the camera
+                    const radiationIndicator = playerObj.mesh.children[3];
+                    if (radiationIndicator) {
+                        radiationIndicator.lookAt(camera.position);
+                    }
                 }
             }
             
