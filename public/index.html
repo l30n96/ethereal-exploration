@@ -247,17 +247,21 @@
                 player.y = data.y;
                 player.z = data.z;
                 camera.position.set(player.x, player.y, player.z);
-                addChatMessage('System', `You are ${playerName}`);
+                addChatMessage('System', `You are ${playerName} at (${Math.round(data.x)}, ${Math.round(data.y)}, ${Math.round(data.z)})`);
                 
-                // Immediately request game state
-                console.log('📡 Requesting initial game state...');
-                socket.emit('player_update', {
-                    x: player.x,
-                    y: player.y,
-                    z: player.z,
-                    rotationX: player.rotationX,
-                    rotationY: player.rotationY
-                });
+                // Immediately request game state and start sending updates
+                console.log('📡 Starting position updates...');
+                setInterval(() => {
+                    if (socket && socket.connected) {
+                        socket.emit('player_update', {
+                            x: player.x,
+                            y: player.y,
+                            z: player.z,
+                            rotationX: player.rotationX,
+                            rotationY: player.rotationY
+                        });
+                    }
+                }, 100); // Send update every 100ms for reliable sync
             });
             
             socket.on('game_state', (data) => {
@@ -319,13 +323,22 @@
         }
         
         function updateOtherPlayers(players) {
-            console.log('👥 Updating other players. Received:', players.length, 'players');
-            console.log('Player data:', players.map(p => ({name: p.name, pos: `(${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)})`, distance: p.distance})));
+            console.log('👥 updateOtherPlayers called with:', players);
+            
+            if (!players || players.length === 0) {
+                console.log('❌ No players data received');
+                return;
+            }
+            
+            console.log('👥 Processing', players.length, 'players:');
+            players.forEach(p => {
+                console.log(`  - ${p.name}: (${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)}) distance: ${p.distance}m, color: #${p.color.toString(16)}`);
+            });
             
             // Remove old players
             for (const [id, playerObj] of otherPlayers) {
                 if (!players.find(p => p.id === id)) {
-                    console.log(`➖ Removing player ${playerObj.data.name}`);
+                    console.log(`➖ Removing player ${playerObj.data.name} from scene`);
                     scene.remove(playerObj.mesh);
                     otherPlayers.delete(id);
                 }
@@ -336,46 +349,55 @@
                 let playerObj = otherPlayers.get(playerData.id);
                 
                 if (!playerObj) {
-                    console.log(`➕ Creating new player mesh for ${playerData.name} at (${Math.round(playerData.x)}, ${Math.round(playerData.y)}, ${Math.round(playerData.z)})`);
+                    console.log(`🎨 Creating 3D mesh for ${playerData.name}`);
                     
-                    // Create larger, more visible player mesh
-                    const geometry = new THREE.CapsuleGeometry(5, 15, 4, 8); // Made bigger
-                    const material = new THREE.MeshLambertMaterial({
+                    // Create a very visible player representation
+                    const group = new THREE.Group();
+                    
+                    // Main body - bright capsule
+                    const bodyGeometry = new THREE.CapsuleGeometry(4, 12, 4, 8);
+                    const bodyMaterial = new THREE.MeshLambertMaterial({
                         color: playerData.color,
-                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.3) // Brighter
+                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.4)
                     });
+                    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+                    group.add(body);
                     
-                    const mesh = new THREE.Mesh(geometry, material);
-                    mesh.position.set(playerData.x, playerData.y, playerData.z);
-                    
-                    // Add a glowing sphere on top for visibility
+                    // Glowing top sphere - very bright
                     const glowGeometry = new THREE.SphereGeometry(3);
                     const glowMaterial = new THREE.MeshBasicMaterial({
                         color: playerData.color,
-                        emissive: new THREE.Color(playerData.color)
+                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.8)
                     });
                     const glowSphere = new THREE.Mesh(glowGeometry, glowMaterial);
-                    glowSphere.position.y = 12;
-                    mesh.add(glowSphere);
+                    glowSphere.position.y = 10;
+                    group.add(glowSphere);
                     
-                    scene.add(mesh);
+                    // Name label (floating text would be nice but let's keep it simple)
+                    console.log(`📍 Positioning ${playerData.name} at (${playerData.x}, ${playerData.y}, ${playerData.z})`);
+                    group.position.set(playerData.x, playerData.y, playerData.z);
                     
-                    playerObj = { mesh, data: playerData };
+                    scene.add(group);
+                    console.log(`✅ Added ${playerData.name} to 3D scene`);
+                    
+                    playerObj = { mesh: group, data: playerData };
                     otherPlayers.set(playerData.id, playerObj);
                     
-                    showNotification(`${playerData.name} appeared nearby! (${playerData.distance}m away)`, 3000);
-                    addChatMessage('System', `${playerData.name} is ${playerData.distance}m away`);
+                    showNotification(`👋 ${playerData.name} is ${playerData.distance}m away!`, 4000);
                 } else {
                     // Update existing player position
-                    console.log(`🔄 Updating ${playerData.name} position to (${Math.round(playerData.x)}, ${Math.round(playerData.y)}, ${Math.round(playerData.z)})`);
+                    console.log(`🔄 Moving ${playerData.name} to (${playerData.x}, ${playerData.y}, ${playerData.z})`);
                     playerObj.mesh.position.set(playerData.x, playerData.y, playerData.z);
                     playerObj.data = playerData;
                 }
             });
             
-            console.log(`👥 Total other players visible: ${otherPlayers.size}`);
+            console.log(`👥 Scene now has ${otherPlayers.size} other players visible`);
             
-            // Force a render update
+            // Debug: Log current camera position for reference
+            console.log(`📷 Your position: (${Math.round(player.x)}, ${Math.round(player.y)}, ${Math.round(player.z)})`);
+            
+            // Force render update
             renderer.render(scene, camera);
         }
         
@@ -643,11 +665,10 @@
             document.getElementById('coords').textContent = 
                 `${Math.round(player.x)}, ${Math.round(player.y)}, ${Math.round(player.z)}`;
             
-            // Send update to server (throttled)
+            // Send update to server (more frequent for better sync)
             if (socket && socket.connected) {
-                // Send updates more frequently and add some logging
-                if (Math.random() < 0.2) { // 20% chance = ~12 updates per second
-                    console.log('📤 Sending position update:', {x: Math.round(player.x), y: Math.round(player.y), z: Math.round(player.z)});
+                // Send updates every few frames to ensure server gets position updates
+                if (Math.random() < 0.5) { // 50% chance = ~30 updates per second
                     socket.emit('player_update', {
                         x: player.x,
                         y: player.y,
