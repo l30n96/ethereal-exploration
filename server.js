@@ -164,7 +164,8 @@ class Player {
             if (distance <= WORLD_SETTINGS.radiationRange) {
                 // Radiation increases based on proximity (closer = more radiation)
                 const radiationFactor = 1 - (distance / WORLD_SETTINGS.radiationRange);
-                this.radiationFromPlayers += WORLD_SETTINGS.radiationIncrease * radiationFactor;
+                const radiationIncrease = WORLD_SETTINGS.radiationIncrease * radiationFactor;
+                this.radiationFromPlayers += radiationIncrease;
                 
                 this.nearbyPlayers.push({
                     id: otherPlayer.id,
@@ -172,11 +173,18 @@ class Player {
                     distance: Math.round(distance),
                     radiationLevel: Math.round(otherPlayer.radiationLevel)
                 });
+                
+                // Debug logging for radiation
+                if (Math.random() < 0.01) { // 1% chance to log
+                    console.log(`☢️ ${this.name} getting ${radiationIncrease.toFixed(3)} radiation from ${otherPlayer.name} at ${Math.round(distance)}m (factor: ${radiationFactor.toFixed(2)})`);
+                }
             }
         }
         
         // Apply radiation from players to total radiation
-        this.radiationLevel = Math.min(100, this.radiationLevel + this.radiationFromPlayers);
+        if (this.radiationFromPlayers > 0) {
+            this.radiationLevel = Math.min(100, this.radiationLevel + this.radiationFromPlayers);
+        }
     }
 
     handleRadiationDeath() {
@@ -315,6 +323,8 @@ class WorldObject {
             collectedBy: this.collectedBy,
             hue: this.hue,
             tentacleCount: this.tentacleCount,
+            fleeSpeed: this.fleeSpeed,
+            detectionRange: this.detectionRange,
             competingPlayers: this.competingPlayers.length
         };
     }
@@ -619,6 +629,13 @@ io.on('connection', (socket) => {
                 nearbyPlayers: player.nearbyPlayers
             }
         });
+        
+        // Also send updated world objects (for creature movement)
+        if (Math.random() < 0.1) { // 10% chance to send world update (every ~1 second per player)
+            socket.emit('world_sync', {
+                objects: nearbyObjects
+            });
+        }
     });
     
     // Handle resource collection attempts
