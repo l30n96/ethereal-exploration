@@ -501,6 +501,7 @@
                 if (data.players) {
                     updateOtherPlayers(data.players);
                     updatePlayerList(data.players);
+                    updatePlayerDots(data.players); // Fix: Use players data for radar
                 }
                 
                 if (data.objects) {
@@ -794,6 +795,8 @@
         }
         
         function updatePlayerStats(stats) {
+            console.log('📊 Updating player stats from server:', stats);
+            
             // Update local stats from server
             score = stats.score;
             discoveries = stats.discoveries;
@@ -801,11 +804,33 @@
             creaturesFound = stats.creatures;
             radiationLevel = stats.radiationLevel;
             
-            // Update HUD with server stats
+            // Update HUD elements
             document.getElementById('score').textContent = score;
             document.getElementById('discoveries').textContent = discoveries;
             document.getElementById('rare').textContent = rareItems;
             document.getElementById('creatures').textContent = creaturesFound;
+            document.getElementById('radiation').textContent = Math.round(radiationLevel);
+            
+            // Update radiation color
+            const radiationElement = document.getElementById('radiation');
+            if (radiationLevel < 30) {
+                radiationElement.style.color = '#4ecdc4';
+                radiationElement.style.textShadow = 'none';
+            } else if (radiationLevel < 60) {
+                radiationElement.style.color = '#ffd93d';
+                radiationElement.style.textShadow = 'none';
+            } else if (radiationLevel < 85) {
+                radiationElement.style.color = '#ff6b6b';
+                radiationElement.style.textShadow = 'none';
+            } else {
+                radiationElement.style.color = '#ff0000';
+                radiationElement.style.textShadow = '0 0 10px #ff0000';
+            }
+            
+            // Show additional competitive stats in console
+            if (stats.resourcesStolen > 0 || stats.resourcesLost > 0) {
+                console.log(`🏴‍☠️ Competitive stats: ${stats.resourcesStolen} stolen, ${stats.resourcesLost} lost`);
+            }
         }
         
         function updateLeaderboard(leaderboard) {
@@ -822,11 +847,17 @@
         }
         
         function updateOtherPlayers(players) {
-            console.log('👥 Updating other players:', players.length);
+            console.log('👥 Updating other players:', players.length, 'players received');
             
-            // Remove old players
+            if (!players || players.length === 0) {
+                console.log('❌ No players data received');
+                return;
+            }
+            
+            // Remove old players that are no longer in the list
             for (const [id, playerObj] of otherPlayers) {
                 if (!players.find(p => p.id === id)) {
+                    console.log(`➖ Removing player ${playerObj.data.name} from scene`);
                     scene.remove(playerObj.mesh);
                     otherPlayers.delete(id);
                 }
@@ -837,7 +868,7 @@
                 let playerObj = otherPlayers.get(playerData.id);
                 
                 if (!playerObj) {
-                    console.log(`🎨 Creating 3D mesh for ${playerData.name}`);
+                    console.log(`🎨 Creating 3D mesh for ${playerData.name} at distance ${playerData.distance}m`);
                     
                     const group = new THREE.Group();
                     
@@ -870,6 +901,23 @@
                     glowSphere.position.y = 15;
                     group.add(glowSphere);
                     
+                    // Name label above player
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.width = 256;
+                    canvas.height = 64;
+                    context.fillStyle = '#ffffff';
+                    context.font = '24px Arial';
+                    context.textAlign = 'center';
+                    context.fillText(playerData.name, 128, 40);
+                    
+                    const texture = new THREE.CanvasTexture(canvas);
+                    const labelMaterial = new THREE.SpriteMaterial({ map: texture });
+                    const label = new THREE.Sprite(labelMaterial);
+                    label.position.y = 25;
+                    label.scale.set(20, 5, 1);
+                    group.add(label);
+                    
                     group.position.set(playerData.x, playerData.y, playerData.z);
                     scene.add(group);
                     
@@ -877,16 +925,29 @@
                     otherPlayers.set(playerData.id, playerObj);
                     
                     showNotification(`👋 ${playerData.name} is ${playerData.distance}m away!`, 4000);
+                    addChatMessage('System', `🎯 ${playerData.name} appeared at distance ${playerData.distance}m`);
                 } else {
                     // Update existing player position
+                    console.log(`🔄 Moving ${playerData.name} to (${Math.round(playerData.x)}, ${Math.round(playerData.y)}, ${Math.round(playerData.z)}) - ${playerData.distance}m away`);
                     playerObj.mesh.position.set(playerData.x, playerData.y, playerData.z);
                     playerObj.data = playerData;
                 }
             });
+            
+            console.log(`👥 Scene now has ${otherPlayers.size} other players visible`);
+            console.log(`📷 Your position: (${Math.round(player.x)}, ${Math.round(player.y)}, ${Math.round(player.z)})`);
         }
         
-        function updatePlayerDots(dots) {
-            playerDots = dots;
+        function updatePlayerDots(players) {
+            console.log('📡 Updating radar with players:', players);
+            playerDots = players.map(p => ({
+                x: p.x,
+                y: p.y,
+                z: p.z,
+                color: p.color,
+                name: p.name,
+                distance: p.distance
+            }));
             updateRadar();
         }
         
@@ -901,6 +962,7 @@
             if (!players || players.length === 0) {
                 html += '<div style="opacity: 0.7; font-size: 11px;">No other players nearby</div>';
             } else {
+                console.log('📝 Updating player list with', players.length, 'players');
                 players.forEach(p => {
                     const colorHex = p.color ? p.color.toString(16).padStart(6, '0') : 'ffffff';
                     html += `
@@ -916,10 +978,15 @@
         
         function updateRadar() {
             const radar = document.getElementById('radar');
+            if (!radar) return;
+            
+            // Clear existing dots
             radar.querySelectorAll('.radar-dot').forEach(dot => dot.remove());
             
-            const radarRadius = 60;
-            const maxDistance = 1000;
+            const radarRadius = 60; // Radius of the radar display
+            const maxDistance = 1000; // Maximum distance to show on radar
+            
+            console.log('🎯 Updating radar with', playerDots.length, 'player dots');
             
             playerDots.forEach(dot => {
                 const dx = dot.x - player.x;
@@ -928,19 +995,25 @@
                 const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
                 
                 if (distance > 0 && distance < maxDistance) {
+                    // Calculate angle from player's perspective
                     const angle = Math.atan2(dz, dx);
                     const normalizedDistance = Math.min(distance / maxDistance, 1);
                     
+                    // Calculate position on radar circle
                     const radarX = Math.cos(angle) * normalizedDistance * radarRadius + radarRadius;
                     const radarY = Math.sin(angle) * normalizedDistance * radarRadius + radarRadius;
                     
+                    // Create dot element
                     const dotElement = document.createElement('div');
                     dotElement.className = 'radar-dot';
                     dotElement.style.left = radarX + 'px';
                     dotElement.style.top = radarY + 'px';
                     dotElement.style.backgroundColor = `#${dot.color.toString(16).padStart(6, '0')}`;
+                    dotElement.style.boxShadow = `0 0 4px #${dot.color.toString(16).padStart(6, '0')}`;
+                    dotElement.title = `${dot.name} (${Math.round(distance)}m)`;
                     
                     radar.appendChild(dotElement);
+                    console.log(`📍 Added radar dot for ${dot.name} at distance ${Math.round(distance)}m`);
                 }
             });
         }
@@ -2009,29 +2082,46 @@
             document.getElementById('coords').textContent = 
                 `${Math.round(player.x)}, ${Math.round(player.y)}, ${Math.round(player.z)}`;
             
-            // Calculate real-time score
-            const currentSurvivalScore = Math.floor(survivalTime / 1000) * POINTS.survivalBonus;
-            const currentScore = discoveries * POINTS.discovery + 
-                               rareItems * POINTS.rareEntity + 
-                               creaturesFound * POINTS.spaceCreature + 
-                               currentSurvivalScore;
-            
-            document.getElementById('score').textContent = currentScore;
-            document.getElementById('discoveries').textContent = discoveries;
-            document.getElementById('rare').textContent = rareItems;
-            document.getElementById('creatures').textContent = creaturesFound;
-            document.getElementById('radiation').textContent = Math.round(radiationLevel);
-            
-            const radiationElement = document.getElementById('radiation');
-            if (radiationLevel < 30) {
-                radiationElement.style.color = '#4ecdc4';
-            } else if (radiationLevel < 60) {
-                radiationElement.style.color = '#ffd93d';
-            } else if (radiationLevel < 85) {
-                radiationElement.style.color = '#ff6b6b';
+            // If connected to server, server manages score - otherwise calculate locally
+            if (socket && socket.connected) {
+                // Server will update these via updatePlayerStats()
+                // Just update the radiation display color
+                const radiationElement = document.getElementById('radiation');
+                if (radiationLevel < 30) {
+                    radiationElement.style.color = '#4ecdc4';
+                } else if (radiationLevel < 60) {
+                    radiationElement.style.color = '#ffd93d';
+                } else if (radiationLevel < 85) {
+                    radiationElement.style.color = '#ff6b6b';
+                } else {
+                    radiationElement.style.color = '#ff0000';
+                    radiationElement.style.textShadow = '0 0 10px #ff0000';
+                }
             } else {
-                radiationElement.style.color = '#ff0000';
-                radiationElement.style.textShadow = '0 0 10px #ff0000';
+                // Local/offline mode - calculate score locally
+                const currentSurvivalScore = Math.floor(survivalTime / 1000) * POINTS.survivalBonus;
+                const currentScore = discoveries * POINTS.discovery + 
+                                   rareItems * POINTS.rareEntity + 
+                                   creaturesFound * POINTS.spaceCreature + 
+                                   currentSurvivalScore;
+                
+                document.getElementById('score').textContent = currentScore;
+                document.getElementById('discoveries').textContent = discoveries;
+                document.getElementById('rare').textContent = rareItems;
+                document.getElementById('creatures').textContent = creaturesFound;
+                document.getElementById('radiation').textContent = Math.round(radiationLevel);
+                
+                const radiationElement = document.getElementById('radiation');
+                if (radiationLevel < 30) {
+                    radiationElement.style.color = '#4ecdc4';
+                } else if (radiationLevel < 60) {
+                    radiationElement.style.color = '#ffd93d';
+                } else if (radiationLevel < 85) {
+                    radiationElement.style.color = '#ff6b6b';
+                } else {
+                    radiationElement.style.color = '#ff0000';
+                    radiationElement.style.textShadow = '0 0 10px #ff0000';
+                }
             }
         }
         
