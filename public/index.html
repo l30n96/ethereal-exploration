@@ -1,4 +1,134 @@
-<!DOCTYPE html>
+function updateOtherPlayers(players) {
+            console.log('👥 Updating other players:', players.length);
+            
+            // Remove old players
+            for (const [id, playerObj] of otherPlayers) {
+                if (!players.find(p => p.id === id)) {
+                    scene.remove(playerObj.mesh);
+                    otherPlayers.delete(id);
+                }
+            }
+            
+            // Add/update players
+            players.forEach(playerData => {
+                let playerObj = otherPlayers.get(playerData.id);
+                
+                if (!playerObj) {
+                    console.log(`🎨 Creating 3D mesh for ${playerData.name}`);
+                    
+                    const group = new THREE.Group();
+                    
+                    // Main body
+                    const bodyGeometry = new THREE.CylinderGeometry(3, 3, 12, 8);
+                    const bodyMaterial = new THREE.MeshLambertMaterial({
+                        color: playerData.color,
+                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.4)
+                    });
+                    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+                    group.add(body);
+                    
+                    // Head
+                    const headGeometry = new THREE.SphereGeometry(2.5, 8, 6);
+                    const headMaterial = new THREE.MeshLambertMaterial({
+                        color: new THREE.Color(playerData.color).multiplyScalar(1.2),
+                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.3)
+                    });
+                    const head = new THREE.Mesh(headGeometry, headMaterial);
+                    head.position.y = 8;
+                    group.add(head);
+                    
+                    // Glowing top sphere
+                    const glowGeometry = new THREE.SphereGeometry(4, 8, 6);
+                    const glowMaterial = new THREE.MeshBasicMaterial({
+                        color: playerData.color,
+                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.8)
+                    });
+                    const glowSphere = new THREE.Mesh(glowGeometry, glowMaterial);
+                    glowSphere.position.y = 15;
+                    group.add(glowSphere);
+                    
+                    // Radiation level indicator (floating text-like object)
+                    const radiationIndicator = createRadiationIndicator(playerData.radiationLevel);
+                    radiationIndicator.position.y = 25;
+                    group.add(radiationIndicator);
+                    
+                    group.position.set(playerData.x, playerData.y, playerData.z);
+                    scene.add(group);
+                    
+                    playerObj = { mesh: group, data: playerData };
+                    otherPlayers.set(playerData.id, playerObj);
+                    
+                    showNotification(`👋 ${playerData.name} is ${playerData.distance}m away! (${playerData.radiationLevel}% radiation)`, 4000);
+                } else {
+                    // Update existing player position and radiation indicator
+                    playerObj.mesh.position.set(playerData.x, playerData.y, playerData.z);
+                    playerObj.data = playerData;
+                    
+                    // Update radiation indicator
+                    const radiationIndicator = playerObj.mesh.children[3]; // 4th child
+                    if (radiationIndicator) {
+                        updateRadiationIndicator(radiationIndicator, playerData.radiationLevel);
+                    }
+                }
+            });
+        }
+        
+        function createRadiationIndicator(radiationLevel) {
+            // Create a simple geometric indicator for radiation level
+            const indicatorGroup = new THREE.Group();
+            
+            // Background circle
+            const bgGeometry = new THREE.CircleGeometry(3, 8);
+            const bgMaterial = new THREE.MeshBasicMaterial({
+                color: 0x000000,
+                transparent: true,
+                opacity: 0.7
+            });
+            const bg = new THREE.Mesh(bgGeometry, bgMaterial);
+            indicatorGroup.add(bg);
+            
+            // Radiation level circle (changes color based on level)
+            const radiationGeometry = new THREE.CircleGeometry(2, 8);
+            const radiationColor = getRadiationColor(radiationLevel);
+            const radiationMaterial = new THREE.MeshBasicMaterial({
+                color: radiationColor,
+                transparent: true,
+                opacity: 0.8
+            });
+            const radiationCircle = new THREE.Mesh(radiationGeometry, radiationMaterial);
+            indicatorGroup.add(radiationCircle);
+            
+            // Scale the radiation circle based on level (0-100%)
+            const scale = Math.max(0.1, radiationLevel / 100);
+            radiationCircle.scale.set(scale, scale, 1);
+            
+            // Make indicator always face camera
+            indicatorGroup.userData.radiationLevel = radiationLevel;
+            
+            return indicatorGroup;
+        }
+        
+        function updateRadiationIndicator(indicator, radiationLevel) {
+            if (!indicator || !indicator.children[1]) return;
+            
+            const radiationCircle = indicator.children[1];
+            const scale = Math.max(0.1, radiationLevel / 100);
+            radiationCircle.scale.set(scale, scale, 1);
+            
+            // Update color
+            const radiationColor = getRadiationColor(radiationLevel);
+            radiationCircle.material.color.setHex(radiationColor);
+            
+            indicator.userData.radiationLevel = radiationLevel;
+        }
+        
+        function getRadiationColor(radiationLevel) {
+            if (radiationLevel < 25) return 0x00ff00; // Green
+            if (radiationLevel < 50) return 0xffff00; // Yellow  
+            if (radiationLevel < 75) return 0xff8000; // Orange
+            if (radiationLevel < 90) return 0xff4000; // Red-orange
+            return 0xff0000; // Bright red for high radiation
+        }<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -9,6 +139,17 @@
             margin: 0; 
             padding: 0; 
             box-sizing: border-box;
+            socket.on('player_joined', (data) => {
+                console.log('👋 Player joined:', data);
+                addChatMessage('System', `${data.name} joined the competition!`);
+                updatePlayerCount(data.totalPlayers);
+            });
+            
+            socket.on('player_left', (data) => {
+                console.log('👋 Player left:', data);
+                addChatMessage('System', `${data.name} left the game`);
+                updatePlayerCount(data.totalPlayers);
+            });
         }
         
         html, body { 
@@ -277,9 +418,7 @@
             <div>Deaths: <span id="deaths">0</span></div>
             <div>Players Online: <span id="playerCount">1</span></div>
             <div style="color: #ff6b6b;">Radiation: <span id="radiation">0</span>%</div>
-            <div id="proximityWarning" style="color: #ff0000; font-weight: bold; display: none;">⚠️ PROXIMITY RADIATION!</div>
-            <div id="nearbyPlayersInfo" style="color: #ffd93d; font-size: 12px;"></div>
-        </div>ff6b6b;">Radiation: <span id="radiation">0</span>%</div>
+            <div style="color: #ffa500; font-size: 12px;">From Players: <span id="radiationFromPlayers">0</span>%</div>
         </div>
         
         <div class="player-list" id="playerList">
@@ -388,6 +527,10 @@
         // Multiplayer
         let otherPlayers = new Map();
         let playerDots = [];
+        let kills = 0;
+        let deaths = 0;
+        let radiationFromPlayers = 0;
+        let nearbyPlayers = [];
         
         // 🔧 WORLD GENERATION SETTINGS - CHANGE THESE VALUES
         const WORLD_SETTINGS = {
@@ -477,8 +620,17 @@
                 player.x = data.x;
                 player.y = data.y;
                 player.z = data.z;
+                
+                // Set spawn rotation to look at nearest player
+                if (data.rotation !== undefined) {
+                    player.rotationY = data.rotation;
+                }
+                
                 camera.position.set(player.x, player.y, player.z);
+                camera.rotation.y = player.rotationY;
+                
                 addChatMessage('System', `You are ${playerName} - find resources before others do!`);
+                addChatMessage('System', `⚠️ WARNING: Stay away from other players or radiation will increase!`);
                 
                 // Start sending position updates
                 setInterval(() => {
@@ -566,16 +718,45 @@
                 }
             });
             
-            socket.on('player_joined', (data) => {
-                console.log('👋 Player joined:', data);
-                addChatMessage('System', `${data.name} joined the competition!`);
-                updatePlayerCount(data.totalPlayers);
+            socket.on('player_death', (data) => {
+                console.log('💀 Player death event:', data);
+                
+                if (data.killers.length > 0) {
+                    const killerNames = data.killers.map(k => `${k.name} (${k.newKills} kills)`).join(', ');
+                    addChatMessage('System', `💀 ${data.deadPlayer} died from radiation! Nearby players: ${killerNames} got -${data.radiationBonus}% radiation`);
+                    showNotification(`💀 ${data.deadPlayer} died! ${data.killers.length} players got radiation cleanse`, 4000);
+                } else {
+                    addChatMessage('System', `💀 ${data.deadPlayer} died alone from radiation poisoning`);
+                }
+                
+                // Visual effect for deaths
+                playDeathSound();
+                
+                // If we were one of the killers, show special notification
+                const wasKiller = data.killers.some(k => k.name === playerName);
+                if (wasKiller) {
+                    showNotification(`💚 You gained -${data.radiationBonus}% radiation from ${data.deadPlayer}'s death!`, 5000);
+                    playPortalSound(); // Victory sound
+                }
             });
             
-            socket.on('player_left', (data) => {
-                console.log('👋 Player left:', data);
-                addChatMessage('System', `${data.name} left the game`);
-                updatePlayerCount(data.totalPlayers);
+            socket.on('player_respawn', (data) => {
+                console.log('🔄 Player respawn:', data);
+                
+                // Update our position and rotation
+                player.x = data.x;
+                player.y = data.y;
+                player.z = data.z;
+                player.rotationY = data.rotation;
+                
+                camera.position.set(player.x, player.y, player.z);
+                camera.rotation.y = player.rotationY;
+                
+                // Reset local radiation
+                radiationLevel = 0;
+                
+                showNotification(data.message, 6000);
+                addChatMessage('System', '🔄 You respawned! Look around - you\'re facing the nearest player');
             });
         }
         
@@ -805,12 +986,19 @@
             rareItems = stats.rareItems;
             creaturesFound = stats.creatures;
             radiationLevel = stats.radiationLevel;
+            radiationFromPlayers = stats.radiationFromPlayers || 0;
+            kills = stats.kills || 0;
+            deaths = stats.deaths || 0;
+            nearbyPlayers = stats.nearbyPlayers || [];
             
             // Update HUD with server stats
             document.getElementById('score').textContent = score;
             document.getElementById('discoveries').textContent = discoveries;
             document.getElementById('rare').textContent = rareItems;
             document.getElementById('creatures').textContent = creaturesFound;
+            document.getElementById('kills').textContent = kills;
+            document.getElementById('deaths').textContent = deaths;
+            document.getElementById('radiationFromPlayers').textContent = Math.round(radiationFromPlayers);
         }
         
         function updateLeaderboard(leaderboard) {
@@ -908,14 +1096,35 @@
             } else {
                 players.forEach(p => {
                     const colorHex = p.color ? p.color.toString(16).padStart(6, '0') : 'ffffff';
+                    const radiationColor = getRadiationColor(p.radiationLevel || 0);
+                    const radiationHex = radiationColor.toString(16).padStart(6, '0');
+                    
                     html += `
                         <div class="player-entry">
-                            <span style="color: #${colorHex}">${p.name || 'Unknown'}</span>
-                            <span>${p.distance || '?'}m away</span>
+                            <div>
+                                <span style="color: #${colorHex}">${p.name || 'Unknown'}</span>
+                                <br>
+                                <span style="font-size: 10px; color: #${radiationHex}">☢️ ${p.radiationLevel || 0}% radiation</span>
+                            </div>
+                            <div>
+                                <div>${p.distance || '?'}m away</div>
+                                <div style="font-size: 10px; opacity: 0.8;">💀 ${p.kills || 0} kills</div>
+                            </div>
                         </div>
                     `;
                 });
             }
+            
+            // Show nearby players warning
+            if (nearbyPlayers && nearbyPlayers.length > 0) {
+                html += '<div style="color: #ff6b6b; font-size: 11px; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 5px;">';
+                html += '⚠️ RADIATION SOURCES:<br>';
+                nearbyPlayers.forEach(np => {
+                    html += `${np.name}: ${np.distance}m (${np.radiationLevel}%)<br>`;
+                });
+                html += '</div>';
+            }
+            
             playerList.innerHTML = html;
         }
         
@@ -2050,6 +2259,12 @@
             for (const [id, playerObj] of otherPlayers) {
                 if (playerObj.mesh) {
                     playerObj.mesh.position.y = playerObj.data.y + Math.sin(time * 2) * 0.5;
+                    
+                    // Make radiation indicators always face camera
+                    const radiationIndicator = playerObj.mesh.children[3];
+                    if (radiationIndicator) {
+                        radiationIndicator.lookAt(camera.position);
+                    }
                 }
             }
             
