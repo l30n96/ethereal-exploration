@@ -74,6 +74,8 @@ class Player {
 // Get nearby players
 function getNearbyPlayers(excludeId, x, y, z, range = 1000) { // Increased from 500 to 1000
     const nearby = [];
+    const excludedPlayerName = players[excludeId] ? players[excludeId].name : 'unknown';
+    
     for (const [id, player] of Object.entries(players)) {
         if (id === excludeId) continue;
         
@@ -83,7 +85,6 @@ function getNearbyPlayers(excludeId, x, y, z, range = 1000) { // Increased from 
             Math.pow(player.z - z, 2)
         );
         
-        const excludedPlayerName = players[excludeId] ? players[excludeId].name : 'unknown';
         console.log(`📏 Distance from ${excludedPlayerName} to ${player.name}: ${Math.round(distance)} (range: ${range})`);
         
         if (distance <= range) {
