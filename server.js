@@ -35,35 +35,31 @@ const WORLD_SETTINGS = {
     worldSize: 2500,
     respawnDelay: 30000, // 30 seconds to respawn collected objects
     stealRadius: 100, // Distance within which players can compete for resources
+    
+    // 🔧 PVP RADIATION SETTINGS
+    radiationProximityRange: 150, // Distance where players affect each other's radiation
+    radiationIncreaseRate: 0.08, // How fast radiation builds up when near other players
+    radiationReductionOnKill: 30, // Percentage reduction when another player dies near you
+    safeSpawnDistance: 200, // Minimum spawn distance to avoid immediate radiation
+    maxSpawnDistance: 400, // Maximum spawn distance from other players
+    creatureFleeRange: 120, // Distance creatures start fleeing from players
 };
 
-// Shared world state - all objects exist on server
-let worldObjects = [];
-let objectIdCounter = 0;
-
-// Player storage
-const players = {};
-
-// Object types and their properties
-const OBJECT_TYPES = {
-    discovery: { points: 10, collectRadius: 30, respawnTime: 30000 },
-    exploding: { points: 15, collectRadius: 25, respawnTime: 45000 },
-    rare: { points: 50, collectRadius: 20, respawnTime: 120000 }, // 2 minutes for rare
-    spaceCreature: { points: 25, collectRadius: 35, respawnTime: 60000 },
-    ringPortal: { points: 5, collectRadius: 30, respawnTime: 180000 } // 3 minutes for portals
-};
-
-// Player class with competitive features
+// Player class with PvP features
 class Player {
     constructor(id, socket) {
         this.id = id;
         this.socket = socket;
         this.name = `Player_${id.substring(0, 6)}`;
-        this.x = (Math.random() - 0.5) * 100; // Spawn closer together for competition
-        this.y = (Math.random() - 0.5) * 100;
-        this.z = (Math.random() - 0.5) * 100;
-        this.rotationX = 0;
-        this.rotationY = 0;
+        
+        // Spawn near existing players but at safe distance
+        const spawnPos = this.calculateSpawnPosition();
+        this.x = spawnPos.x;
+        this.y = spawnPos.y;
+        this.z = spawnPos.z;
+        this.rotationX = spawnPos.rotationX;
+        this.rotationY = spawnPos.rotationY;
+        
         this.color = Math.floor(Math.random() * 0xffffff);
         this.radiationLevel = 0;
         this.score = 0;
@@ -73,20 +69,192 @@ class Player {
         this.lastUpdate = Date.now();
         this.joinTime = Date.now();
         
-        // Competition tracking
+        // PvP tracking
         this.resourcesStolen = 0;
         this.resourcesLost = 0;
+        this.kills = 0;
+        this.deaths = 0;
         this.nearbyPlayers = [];
+        this.isDead = false;
+        this.lastDeathTime = 0;
+        
+        console.log(`👤 ${this.name} spawned at (${Math.round(this.x)}, ${Math.round(this.y)}, ${Math.round(this.z)}) looking towards ${spawnPos.targetPlayer || 'center'}`);
+    }
+
+    calculateSpawnPosition() {
+        const existingPlayers = Object.values(players).filter(p => !p.isDead);
+        
+        if (existingPlayers.length === 0) {
+            // First player spawns at center
+            return {
+                x: 0,
+                y: 0,
+                z: 0,
+                rotationX: 0,
+                rotationY: 0,
+                targetPlayer: null
+            };
+        }
+        
+        // Choose a random existing player to spawn near
+        const targetPlayer = existingPlayers[Math.floor(Math.random() * existingPlayers.length)];
+        
+        // Generate spawn position at safe distance
+        const angle = Math.random() * Math.PI * 2;
+        const distance = WORLD_SETTINGS.safeSpawnDistance + 
+                        Math.random() * (WORLD_SETTINGS.maxSpawnDistance - WORLD_SETTINGS.safeSpawnDistance);
+        
+        const spawnX = targetPlayer.x + Math.cos(angle) * distance;
+        const spawnZ = targetPlayer.z + Math.sin(angle) * distance;
+        const spawnY = targetPlayer.y + (Math.random() - 0.5) * 50; // Small Y variation
+        
+        // Calculate rotation to look towards target player
+        const dx = targetPlayer.x - spawnX;
+        const dz = targetPlayer.z - spawnZ;
+        const rotationY = Math.atan2(dx, dz);
+        
+        return {
+            x: spawnX,
+            y: spawnY,
+            z: spawnZ,
+            rotationX: 0,
+            rotationY: rotationY,
+            targetPlayer: targetPlayer.name
+        };
     }
 
     update(data) {
+        if (this.isDead) return; // Dead players can't move
+        
         this.x = data.x || this.x;
         this.y = data.y || this.y;
         this.z = data.z || this.z;
         this.rotationX = data.rotationX || this.rotationX;
         this.rotationY = data.rotationY || this.rotationY;
-        this.radiationLevel = Math.min(100, (data.radiationLevel || this.radiationLevel));
+        this.radiationLevel = Math.min(100, Math.max(0, data.radiationLevel || this.radiationLevel));
         this.lastUpdate = Date.now();
+        
+        // Update nearby players and handle proximity radiation
+        this.updateProximityRadiation();
+        
+        // Check for radiation death
+        if (this.radiationLevel >= 100 && !this.isDead) {
+            this.die();
+        }
+    }
+
+    updateProximityRadiation() {
+        this.nearbyPlayers = [];
+        
+        for (const [id, otherPlayer] of Object.entries(players)) {
+            if (id === this.id || otherPlayer.isDead) continue;
+            
+            const distance = Math.sqrt(
+                Math.pow(otherPlayer.x - this.x, 2) +
+                Math.pow(otherPlayer.y - this.y, 2) +
+                Math.pow(otherPlayer.z - this.z, 2)
+            );
+            
+            if (distance <= WORLD_SETTINGS.radiationProximityRange) {
+                this.nearbyPlayers.push({
+                    id: otherPlayer.id,
+                    name: otherPlayer.name,
+                    distance: distance,
+                    radiationLevel: otherPlayer.radiationLevel
+                });
+                
+                // Increase radiation based on proximity (closer = more radiation)
+                const radiationMultiplier = Math.max(0.1, 1 - (distance / WORLD_SETTINGS.radiationProximityRange));
+                this.radiationLevel += WORLD_SETTINGS.radiationIncreaseRate * radiationMultiplier;
+                
+                console.log(`☢️ ${this.name} gaining radiation from ${otherPlayer.name} (${Math.round(distance)}m away, +${(WORLD_SETTINGS.radiationIncreaseRate * radiationMultiplier).toFixed(3)}%)`);
+            }
+        }
+    }
+
+    die() {
+        this.isDead = true;
+        this.deaths++;
+        this.lastDeathTime = Date.now();
+        this.radiationLevel = 100;
+        
+        console.log(`💀 ${this.name} died from radiation poisoning! (Deaths: ${this.deaths})`);
+        
+        // Check for nearby players who benefit from this death
+        const beneficiaries = [];
+        for (const [id, otherPlayer] of Object.entries(players)) {
+            if (id === this.id || otherPlayer.isDead) continue;
+            
+            const distance = Math.sqrt(
+                Math.pow(otherPlayer.x - this.x, 2) +
+                Math.pow(otherPlayer.y - this.y, 2) +
+                Math.pow(otherPlayer.z - this.z, 2)
+            );
+            
+            if (distance <= WORLD_SETTINGS.radiationProximityRange) {
+                // Reduce radiation for nearby survivors
+                const oldRadiation = otherPlayer.radiationLevel;
+                otherPlayer.radiationLevel = Math.max(0, otherPlayer.radiationLevel - WORLD_SETTINGS.radiationReductionOnKill);
+                const reduction = oldRadiation - otherPlayer.radiationLevel;
+                
+                otherPlayer.kills++;
+                beneficiaries.push({
+                    player: otherPlayer,
+                    distance: Math.round(distance),
+                    reduction: Math.round(reduction)
+                });
+                
+                console.log(`🩸 ${otherPlayer.name} benefits from ${this.name}'s death! Radiation: ${Math.round(oldRadiation)}% → ${Math.round(otherPlayer.radiationLevel)}% (-${Math.round(reduction)}%), Kills: ${otherPlayer.kills}`);
+            }
+        }
+        
+        // Broadcast death event
+        io.emit('player_death', {
+            victim: this.name,
+            victimId: this.id,
+            victimRadiation: Math.round(this.radiationLevel),
+            position: { x: this.x, y: this.y, z: this.z },
+            beneficiaries: beneficiaries.map(b => ({
+                name: b.player.name,
+                distance: b.distance,
+                radiationReduction: b.reduction,
+                newRadiation: Math.round(b.player.radiationLevel),
+                totalKills: b.player.kills
+            }))
+        });
+        
+        // Respawn after delay
+        setTimeout(() => {
+            this.respawn();
+        }, 5000); // 5 second respawn delay
+    }
+
+    respawn() {
+        console.log(`🔄 ${this.name} respawning...`);
+        
+        // Calculate new spawn position
+        const spawnPos = this.calculateSpawnPosition();
+        this.x = spawnPos.x;
+        this.y = spawnPos.y;
+        this.z = spawnPos.z;
+        this.rotationX = spawnPos.rotationX;
+        this.rotationY = spawnPos.rotationY;
+        
+        // Reset state
+        this.isDead = false;
+        this.radiationLevel = 0;
+        this.nearbyPlayers = [];
+        
+        // Broadcast respawn
+        io.emit('player_respawn', {
+            player: this.name,
+            playerId: this.id,
+            position: { x: this.x, y: this.y, z: this.z },
+            rotation: { x: this.rotationX, y: this.rotationY },
+            spawnedNear: spawnPos.targetPlayer
+        });
+        
+        console.log(`✅ ${this.name} respawned near ${spawnPos.targetPlayer} at (${Math.round(this.x)}, ${Math.round(this.y)}, ${Math.round(this.z)})`);
     }
 
     addScore(points, reason) {
@@ -110,7 +278,11 @@ class Player {
             rareItems: this.rareItems,
             creatures: this.creatures,
             resourcesStolen: this.resourcesStolen,
-            resourcesLost: this.resourcesLost
+            resourcesLost: this.resourcesLost,
+            kills: this.kills,
+            deaths: this.deaths,
+            isDead: this.isDead,
+            nearbyPlayers: this.nearbyPlayers.length
         };
     }
 }
@@ -463,7 +635,16 @@ io.on('connection', (socket) => {
                 creatures: player.creatures,
                 radiationLevel: player.radiationLevel,
                 resourcesStolen: player.resourcesStolen,
-                resourcesLost: player.resourcesLost
+                resourcesLost: player.resourcesLost,
+                kills: player.kills,
+                deaths: player.deaths,
+                isDead: player.isDead,
+                nearbyPlayerCount: player.nearbyPlayers.length,
+                nearbyPlayers: player.nearbyPlayers.map(p => ({
+                    name: p.name,
+                    distance: Math.round(p.distance),
+                    radiationLevel: Math.round(p.radiationLevel)
+                }))
             }
         });
     });
@@ -511,7 +692,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// World management loop - handle respawns and cleanup
+// World management loop - handle respawns, creature behavior, and cleanup
 setInterval(() => {
     let respawnCount = 0;
     
@@ -521,6 +702,9 @@ setInterval(() => {
             respawnCount++;
         }
     });
+    
+    // Update creature behavior (fleeing from players)
+    updateCreatureBehavior();
     
     if (respawnCount > 0) {
         console.log(`🔄 Respawned ${respawnCount} objects`);
@@ -540,7 +724,7 @@ setInterval(() => {
             delete players[id];
         }
     }
-}, 5000); // Check every 5 seconds
+}, 2000); // Check every 2 seconds for more responsive creature behavior
 
 // Generate leaderboard
 function getLeaderboard() {
@@ -556,6 +740,11 @@ function getLeaderboard() {
             creatures: player.creatures,
             resourcesStolen: player.resourcesStolen,
             resourcesLost: player.resourcesLost,
+            kills: player.kills,
+            deaths: player.deaths,
+            kdr: player.deaths > 0 ? (player.kills / player.deaths).toFixed(2) : player.kills.toFixed(2),
+            radiationLevel: Math.round(player.radiationLevel),
+            isDead: player.isDead,
             survivalTime: Math.floor((Date.now() - player.joinTime) / 1000)
         }));
     
