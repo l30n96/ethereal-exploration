@@ -239,7 +239,8 @@
                     console.log('🧪 Creating test player:', testPlayer);
                     updateOtherPlayers([testPlayer]);
                     updatePlayerList([testPlayer]);
-                }, 2000);
+                    addChatMessage('System', '🧪 Test player added! Look for a red figure 50m away.');
+                }, 3000);
             });
             
             socket.on('disconnect', () => {
@@ -375,11 +376,11 @@
                 if (!playerObj) {
                     console.log(`🎨 Creating 3D mesh for ${playerData.name}`);
                     
-                    // Create a very visible player representation
+                    // Create a very visible player representation using basic geometries
                     const group = new THREE.Group();
                     
-                    // Main body - bright capsule
-                    const bodyGeometry = new THREE.CapsuleGeometry(4, 12, 4, 8);
+                    // Main body - cylinder (more reliable than CapsuleGeometry)
+                    const bodyGeometry = new THREE.CylinderGeometry(3, 3, 12, 8);
                     const bodyMaterial = new THREE.MeshLambertMaterial({
                         color: playerData.color,
                         emissive: new THREE.Color(playerData.color).multiplyScalar(0.4)
@@ -387,27 +388,37 @@
                     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
                     group.add(body);
                     
-                    // Glowing top sphere - very bright
-                    const glowGeometry = new THREE.SphereGeometry(3);
+                    // Head - sphere
+                    const headGeometry = new THREE.SphereGeometry(2.5, 8, 6);
+                    const headMaterial = new THREE.MeshLambertMaterial({
+                        color: new THREE.Color(playerData.color).multiplyScalar(1.2),
+                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.3)
+                    });
+                    const head = new THREE.Mesh(headGeometry, headMaterial);
+                    head.position.y = 8;
+                    group.add(head);
+                    
+                    // Glowing top sphere - very bright and big
+                    const glowGeometry = new THREE.SphereGeometry(4, 8, 6);
                     const glowMaterial = new THREE.MeshBasicMaterial({
                         color: playerData.color,
                         emissive: new THREE.Color(playerData.color).multiplyScalar(0.8)
                     });
                     const glowSphere = new THREE.Mesh(glowGeometry, glowMaterial);
-                    glowSphere.position.y = 10;
+                    glowSphere.position.y = 15;
                     group.add(glowSphere);
                     
-                    // Name label (floating text would be nice but let's keep it simple)
                     console.log(`📍 Positioning ${playerData.name} at (${playerData.x}, ${playerData.y}, ${playerData.z})`);
                     group.position.set(playerData.x, playerData.y, playerData.z);
                     
                     scene.add(group);
-                    console.log(`✅ Added ${playerData.name} to 3D scene`);
+                    console.log(`✅ Added ${playerData.name} to 3D scene successfully!`);
                     
                     playerObj = { mesh: group, data: playerData };
                     otherPlayers.set(playerData.id, playerObj);
                     
                     showNotification(`👋 ${playerData.name} is ${playerData.distance}m away!`, 4000);
+                    addChatMessage('System', `🎯 ${playerData.name} appeared at distance ${playerData.distance}m`);
                 } else {
                     // Update existing player position
                     console.log(`🔄 Moving ${playerData.name} to (${playerData.x}, ${playerData.y}, ${playerData.z})`);
