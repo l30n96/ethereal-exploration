@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ethereal Exploration - Multiplayer</title>
+    <style>
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box;
+        }
+        
+        html, body { 
+            width: 100%; 
+            height: 100%; 
+            overflow: hidden; 
+            background: #000; 
+            font-family: Arial, sans-serif; 
+        }
+        
+        #gameCanvas { 
+            display: block; 
+            width: 100vw !important;
+            height: 100vh !important;
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+        
+        .ui-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 100; color: white;
+        }
+        
+        .hud {
+            position: absolute; top: 20px; left: 20px;
+            font-size: 14px; text-shadow: 0 0 10px rgba(255,255,255,0.5);
+        }
+        
+        .connection-status {
+            position: absolute; top: 20px; left: 50%;
+            transform: translateX(-50%); padding: 5px 10px;
+            background: rgba(0,0,0,0.7); border-radius: 15px;
+            font-size: 12px;
+        }
+        
+        .connected { color: #4ecdc4; }
+        .connecting { color: #ffd93d; }
+        .disconnected { color: #ff6b6b; }
+        
+        .chat-container {
+            position: absolute; bottom: 20px; left: 20px;
+            width: 350px; pointer-events: all;
+        }
+        
+        .chat-messages {
+            background: rgba(0,0,0,0.8); border-radius: 10px;
+            padding: 10px; max-height: 150px; overflow-y: auto;
+            margin-bottom: 10px; font-size: 12px;
+            border: 1px solid rgba(78, 205, 196, 0.3);
+        }
+        
+        .chat-input {
+            width: 100%; padding: 8px; border: none; border-radius: 5px;
+            background: rgba(0,0,0,0.8); color: white;
+            border: 1px solid rgba(78, 205, 196, 0.5);
+            font-size: 12px;
+        }
+        
+        .chat-input:focus {
+            outline: none;
+            border-color: #4ecdc4;
+            box-shadow: 0 0 10px rgba(78, 205, 196, 0.3);
+        }
+        
+        .chat-input::placeholder { color: rgba(255,255,255,0.5); }
+        
+        .player-list {
+            position: absolute; top: 20px; right: 20px;
+            max-width: 250px; font-size: 12px;
+            background: rgba(0,0,0,0.7); padding: 10px; border-radius: 10px;
+            max-height: 300px; overflow-y: auto;
+        }
+        
+        .player-entry {
+            padding: 3px 0; display: flex; justify-content: space-between;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .controls {
+            position: absolute; bottom: 20px; right: 20px;
+            text-align: right; font-size: 12px; opacity: 0.7;
+        }
+        
+        .start-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 200;
+            pointer-events: all;
+        }
+        
+        .game-title {
+            font-size: 4em; margin-bottom: 20px; text-align: center;
+            background: linear-gradient(45deg, #4ecdc4, #45b7d1);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        
+        .start-button {
+            padding: 15px 40px; font-size: 1.5em;
+            background: linear-gradient(45deg, #4ecdc4, #45b7d1);
+            border: none; color: white; border-radius: 30px; cursor: pointer;
+            transition: all 0.3s ease; margin-top: 30px;
+        }
+        
+        .start-button:hover { transform: scale(1.1); }
+        
+        .notification {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(78, 205, 196, 0.2); border: 2px solid rgba(78, 205, 196, 0.8);
+            border-radius: 15px; padding: 20px; text-align: center;
+            opacity: 0; transition: opacity 0.5s ease; z-index: 150;
+        }
+        
+        .notification.show { opacity: 1; }
+        
+        .radar {
+            position: absolute; bottom: 180px; right: 20px;
+            width: 120px; height: 120px; border-radius: 50%;
+            background: rgba(0,0,0,0.8); border: 2px solid #4ecdc4;
+            pointer-events: none;
+        }
+        
+        .radar-dot {
+            position: absolute; width: 4px; height: 4px;
+            border-radius: 50%; transform: translate(-50%, -50%);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div class="ui-overlay">
+        <div class="connection-status" id="connectionStatus">
+            <span class="connecting">Connecting...</span>
+        </div>
+        
+        <div class="hud">
+            <div>Position: <span id="coords">0, 0, 0</span></div>
+            <div>Players Online: <span id="playerCount">1</span></div>
+            <div>Status: <span id="gameStatus">Loading...</span></div>
+        </div>
+        
+        <div class="player-list" id="playerList">
+            <div style="font-weight: bold; margin-bottom: 5px;">Other Players</div>
+            <div style="opacity: 0.7; font-size: 11px;">No other players nearby</div>
+        </div>
+        
+        <div class="controls">
+            <div>WASD - Move | QE - Up/Down | Arrow Keys - Look</div>
+            <div>Enter - Chat | R - Reset Position</div>
+        </div>
+        
+        <div class="chat-container">
+            <div class="chat-messages" id="chatMessages"></div>
+            <input type="text" class="chat-input" id="chatInput" placeholder="Press Enter to chat..." maxlength="100">
+        </div>
+        
+        <div class="radar" id="radar">
+            <div style="position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 10px;">Players</div>
+        </div>
+        
+        <div class="notification" id="notification">
+            <div id="notifText">Welcome!</div>
+        </div>
+    </div>
+    
+    <div class="start-screen" id="startScreen">
+        <h1 class="game-title">Ethereal Exploration</h1>
+        <h2 style="color: #4ecdc4; margin-bottom: 20px;">Multiplayer Test</h2>
+        <p style="text-align: center; max-width: 600px; margin: 20px;">
+            Testing multiplayer connections and chat. Move around with WASD and chat with other players!
+        </p>
+        <button class="start-button" onclick="startGame()">Join Game</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        console.log('🎮 Starting Ethereal Exploration Multiplayer Test');
+        
+        // Global variables
+        let scene, camera, renderer;
+        let player = { x: 0, y: 0, z: 0, rotationX: 0, rotationY: 0 };
+        let keys = {};
+        let gameStarted = false;
+        let socket;
+        let playerId;
+        let playerName;
+        let chatFocused = false;
+        
+        // Other players
+        let otherPlayers = new Map();
+        let playerDots = [];
+        
+        function startGame() {
+            console.log('🚀 Starting game...');
+            document.getElementById('startScreen').style.display = 'none';
+            gameStarted = true;
+            document.getElementById('gameStatus').textContent = 'Connecting...';
+            initSocket();
+        }
+        
+        function initSocket() {
+            console.log('🔌 Connecting to server...');
+            document.getElementById('connectionStatus').innerHTML = '<span class="connecting">Connecting...</span>';
+            
+            socket = io();
+            
+            socket.on('connect', () => {
+                console.log('✅ Connected to server:', socket.id);
+                document.getElementById('connectionStatus').innerHTML = '<span class="connected">Connected</span>';
+                document.getElementById('gameStatus').textContent = 'Connected';
+                showNotification('Connected to multiplayer server!');
+                addChatMessage('System', 'Connected to server! You can now chat with other players.');
+            });
+            
+            socket.on('disconnect', () => {
+                console.log('❌ Disconnected from server');
+                document.getElementById('connectionStatus').innerHTML = '<span class="disconnected">Disconnected</span>';
+                document.getElementById('gameStatus').textContent = 'Disconnected';
+                addChatMessage('System', 'Disconnected from server');
+            });
+            
+            socket.on('connect_error', (error) => {
+                console.log('❌ Connection error:', error);
+                document.getElementById('connectionStatus').innerHTML = '<span class="disconnected">Connection Failed</span>';
+                document.getElementById('gameStatus').textContent = 'Connection Failed';
+                addChatMessage('System', 'Failed to connect to server');
+            });
+            
+            socket.on('player_init', (data) => {
+                console.log('👤 Player initialized:', data);
+                playerId = data.id;
+                playerName = data.name;
+                player.x = data.x;
+                player.y = data.y;
+                player.z = data.z;
+                camera.position.set(player.x, player.y, player.z);
+                addChatMessage('System', `You are ${playerName}`);
+                
+                // Immediately request game state
+                console.log('📡 Requesting initial game state...');
+                socket.emit('player_update', {
+                    x: player.x,
+                    y: player.y,
+                    z: player.z,
+                    rotationX: player.rotationX,
+                    rotationY: player.rotationY
+                });
+            });
+            
+            socket.on('game_state', (data) => {
+                console.log('🎮 Game state received:', {
+                    nearbyPlayers: data.players ? data.players.length : 0,
+                    totalPlayers: data.totalPlayers,
+                    playerDots: data.playerDots ? data.playerDots.length : 0,
+                    yourPosition: data.yourPosition
+                });
+                
+                if (data.players) {
+                    updateOtherPlayers(data.players);
+                    updatePlayerList(data.players);
+                }
+                
+                if (data.playerDots) {
+                    updatePlayerDots(data.playerDots);
+                }
+                
+                if (data.totalPlayers) {
+                    updatePlayerCount(data.totalPlayers);
+                }
+            });
+            
+            socket.on('chat_message', (data) => {
+                console.log('💬 Chat message received:', data);
+                const displayName = data.playerId === playerId ? 'You' : data.playerName;
+                addChatMessage(displayName, data.message);
+                
+                if (data.playerId !== playerId) {
+                    showNotification(`💬 ${data.playerName}: ${data.message}`, 3000);
+                }
+            });
+            
+            socket.on('player_joined', (data) => {
+                console.log('👋 Player joined:', data);
+                addChatMessage('System', `${data.name} joined the game`);
+                updatePlayerCount(data.totalPlayers);
+            });
+            
+            socket.on('player_left', (data) => {
+                console.log('👋 Player left:', data);
+                addChatMessage('System', `${data.name} left the game`);
+                updatePlayerCount(data.totalPlayers);
+            });
+        }
+        
+        function updateOtherPlayers(players) {
+            console.log('👥 Updating other players:', players.map(p => p.name));
+            
+            // Remove old players
+            for (const [id, playerObj] of otherPlayers) {
+                if (!players.find(p => p.id === id)) {
+                    console.log(`➖ Removing player ${playerObj.data.name}`);
+                    scene.remove(playerObj.mesh);
+                    otherPlayers.delete(id);
+                }
+            }
+            
+            // Add/update players
+            players.forEach(playerData => {
+                let playerObj = otherPlayers.get(playerData.id);
+                
+                if (!playerObj) {
+                    console.log(`➕ Adding new player ${playerData.name} at (${Math.round(playerData.x)}, ${Math.round(playerData.y)}, ${Math.round(playerData.z)})`);
+                    
+                    // Create new player mesh
+                    const geometry = new THREE.CapsuleGeometry(3, 8, 4, 8);
+                    const material = new THREE.MeshLambertMaterial({
+                        color: playerData.color,
+                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.2)
+                    });
+                    
+                    const mesh = new THREE.Mesh(geometry, material);
+                    mesh.position.set(playerData.x, playerData.y, playerData.z);
+                    scene.add(mesh);
+                    
+                    playerObj = { mesh, data: playerData };
+                    otherPlayers.set(playerData.id, playerObj);
+                    
+                    showNotification(`${playerData.name} is nearby!`, 2000);
+                } else {
+                    // Update existing player position
+                    playerObj.mesh.position.set(playerData.x, playerData.y, playerData.z);
+                    playerObj.data = playerData;
+                }
+            });
+            
+            console.log(`👥 Total other players in scene: ${otherPlayers.size}`);
+        }
+        
+        function updatePlayerDots(dots) {
+            playerDots = dots;
+            updateRadar();
+        }
+        
+        function updatePlayerCount(count) {
+            document.getElementById('playerCount').textContent = count;
+        }
+        
+        function updatePlayerList(players) {
+            const playerList = document.getElementById('playerList');
+            let html = '<div style="font-weight: bold; margin-bottom: 5px;">Other Players</div>';
+            
+            if (players.length === 0) {
+                html += '<div style="opacity: 0.7; font-size: 11px;">No other players nearby</div>';
+            } else {
+                players.forEach(p => {
+                    html += `
+                        <div class="player-entry">
+                            <span style="color: #${p.color.toString(16).padStart(6, '0')}">${p.name}</span>
+                            <span>${Math.round(p.distance)}m</span>
+                        </div>
+                    `;
+                });
+            }
+            
+            playerList.innerHTML = html;
+        }
+        
+        function updateRadar() {
+            const radar = document.getElementById('radar');
+            radar.querySelectorAll('.radar-dot').forEach(dot => dot.remove());
+            
+            const radarRadius = 60;
+            const maxDistance = 1000;
+            
+            playerDots.forEach(dot => {
+                const dx = dot.x - player.x;
+                const dy = dot.y - player.y;
+                const dz = dot.z - player.z;
+                const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                
+                if (distance > 0 && distance < maxDistance) {
+                    const angle = Math.atan2(dz, dx);
+                    const normalizedDistance = Math.min(distance / maxDistance, 1);
+                    
+                    const radarX = Math.cos(angle) * normalizedDistance * radarRadius + radarRadius;
+                    const radarY = Math.sin(angle) * normalizedDistance * radarRadius + radarRadius;
+                    
+                    const dotElement = document.createElement('div');
+                    dotElement.className = 'radar-dot';
+                    dotElement.style.left = radarX + 'px';
+                    dotElement.style.top = radarY + 'px';
+                    dotElement.style.backgroundColor = `#${dot.color.toString(16).padStart(6, '0')}`;
+                    
+                    radar.appendChild(dotElement);
+                }
+            });
+        }
+        
+        function addChatMessage(playerName, message) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageElement = document.createElement('div');
+            
+            const timestamp = new Date().toLocaleTimeString('en-US', { 
+                hour12: false, 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+            
+            messageElement.innerHTML = `<span style="color: #666; font-size: 10px;">[${timestamp}]</span> <strong style="color: #4ecdc4">${playerName}:</strong> ${message}`;
+            messageElement.style.marginBottom = '3px';
+            messageElement.style.wordWrap = 'break-word';
+            
+            chatMessages.appendChild(messageElement);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            while (chatMessages.children.length > 50) {
+                chatMessages.removeChild(chatMessages.firstChild);
+            }
+        }
+        
+        function showNotification(text, duration = 3000) {
+            const notif = document.getElementById('notification');
+            document.getElementById('notifText').textContent = text;
+            notif.classList.add('show');
+            setTimeout(() => notif.classList.remove('show'), duration);
+        }
+        
+        function init() {
+            console.log('🎨 Initializing 3D scene...');
+            
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 2000);
+            
+            const canvas = document.getElementById('gameCanvas');
+            renderer = new THREE.WebGLRenderer({ 
+                canvas: canvas, 
+                antialias: true,
+                alpha: false
+            });
+            
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setClearColor(0x000510, 1);
+            
+            canvas.style.width = '100vw';
+            canvas.style.height = '100vh';
+            canvas.style.position = 'fixed';
+            canvas.style.top = '0';
+            canvas.style.left = '0';
+            canvas.style.zIndex = '1';
+            
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+            
+            // Create stars
+            createStars();
+            
+            // Setup controls
+            setupControls();
+            
+            // Start animation loop
+            animate();
+            
+            console.log('✅ 3D scene initialized');
+        }
+        
+        function createStars() {
+            const starGeometry = new THREE.BufferGeometry();
+            const starCount = 1000;
+            const positions = new Float32Array(starCount * 3);
+            
+            for (let i = 0; i < starCount * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 4000;
+                positions[i + 1] = (Math.random() - 0.5) * 4000;
+                positions[i + 2] = (Math.random() - 0.5) * 4000;
+            }
+            
+            starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const stars = new THREE.Points(starGeometry, new THREE.PointsMaterial({ color: 0xffffff, size: 2 }));
+            scene.add(stars);
+        }
+        
+        function setupControls() {
+            document.addEventListener('keydown', (e) => {
+                if (chatFocused && e.code !== 'Enter' && e.code !== 'Escape') return;
+                
+                keys[e.code] = true;
+                
+                if (e.code === 'KeyR') {
+                    player.x = 0;
+                    player.y = 0;
+                    player.z = 0;
+                    camera.position.set(0, 0, 0);
+                }
+                
+                if (e.code === 'Enter') {
+                    const chatInput = document.getElementById('chatInput');
+                    if (!chatFocused) {
+                        chatInput.focus();
+                        chatFocused = true;
+                        e.preventDefault();
+                    } else {
+                        const message = chatInput.value.trim();
+                        if (message) {
+                            if (socket && socket.connected) {
+                                console.log('📤 Sending chat message:', message);
+                                socket.emit('chat_message', { message });
+                            } else {
+                                console.log('❌ Not connected, cannot send chat');
+                                addChatMessage('You', message);
+                                addChatMessage('System', 'Not connected to server');
+                            }
+                            chatInput.value = '';
+                        }
+                        chatInput.blur();
+                        chatFocused = false;
+                        e.preventDefault();
+                    }
+                }
+                
+                if (e.code === 'Escape' && chatFocused) {
+                    const chatInput = document.getElementById('chatInput');
+                    chatInput.value = '';
+                    chatInput.blur();
+                    chatFocused = false;
+                    e.preventDefault();
+                }
+            });
+            
+            document.addEventListener('keyup', (e) => {
+                keys[e.code] = false;
+            });
+            
+            document.getElementById('chatInput').addEventListener('focus', () => {
+                chatFocused = true;
+            });
+            
+            document.getElementById('chatInput').addEventListener('blur', () => {
+                chatFocused = false;
+            });
+            
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+        
+        function updatePlayer() {
+            if (!gameStarted || chatFocused) return;
+            
+            const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? 2.0 : 1.0;
+            const lookSpeed = 0.03;
+            
+            // Camera rotation
+            if (keys['ArrowLeft']) player.rotationY += lookSpeed;
+            if (keys['ArrowRight']) player.rotationY -= lookSpeed;
+            if (keys['ArrowUp']) player.rotationX += lookSpeed;
+            if (keys['ArrowDown']) player.rotationX -= lookSpeed;
+            
+            player.rotationX = Math.max(-Math.PI/2, Math.min(Math.PI/2, player.rotationX));
+            
+            camera.rotation.order = 'YXZ';
+            camera.rotation.y = player.rotationY;
+            camera.rotation.x = player.rotationX;
+            
+            // Movement
+            const forward = new THREE.Vector3(0, 0, -1);
+            const right = new THREE.Vector3(1, 0, 0);
+            const up = new THREE.Vector3(0, 1, 0);
+            forward.applyQuaternion(camera.quaternion);
+            right.applyQuaternion(camera.quaternion);
+            
+            const movement = new THREE.Vector3();
+            
+            if (keys['KeyW']) movement.addScaledVector(forward, speed);
+            if (keys['KeyS']) movement.addScaledVector(forward, -speed);
+            if (keys['KeyA']) movement.addScaledVector(right, -speed);
+            if (keys['KeyD']) movement.addScaledVector(right, speed);
+            if (keys['KeyQ']) movement.addScaledVector(up, speed);
+            if (keys['KeyE']) movement.addScaledVector(up, -speed);
+            
+            player.x += movement.x;
+            player.y += movement.y;
+            player.z += movement.z;
+            
+            camera.position.set(player.x, player.y, player.z);
+            
+            // Update HUD
+            document.getElementById('coords').textContent = 
+                `${Math.round(player.x)}, ${Math.round(player.y)}, ${Math.round(player.z)}`;
+            
+            // Send update to server (throttled)
+            if (socket && socket.connected) {
+                // Send updates more frequently for better sync
+                if (Math.random() < 0.3) { // 30% chance = ~18 updates per second
+                    socket.emit('player_update', {
+                        x: player.x,
+                        y: player.y,
+                        z: player.z,
+                        rotationX: player.rotationX,
+                        rotationY: player.rotationY
+                    });
+                }
+            }
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            updatePlayer();
+            
+            // Simple animation for other players
+            const time = Date.now() * 0.001;
+            for (const [id, playerObj] of otherPlayers) {
+                if (playerObj.mesh) {
+                    playerObj.mesh.position.y = playerObj.data.y + Math.sin(time * 2) * 0.5;
+                }
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Initialize everything
+        console.log('🎯 Initializing game...');
+        init();
+    </script>
+</body>
+</html>
