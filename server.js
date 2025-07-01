@@ -35,14 +35,6 @@ const WORLD_SETTINGS = {
     worldSize: 2500,
     respawnDelay: 30000, // 30 seconds to respawn collected objects
     stealRadius: 100, // Distance within which players can compete for resources
-    
-    // 🔧 PVP RADIATION SETTINGS
-    radiationRange: 150, // Distance at which players affect each other's radiation
-    radiationIncrease: 0.08, // Rate of radiation increase when near other players
-    deathRadiationBonus: 30, // Radiation reduction for surviving nearby deaths
-    spawnDistance: 200, // Distance from other players when spawning
-    maxSpawnDistance: 400, // Maximum spawn distance from nearest player
-    creatureFleeDistance: 120, // Distance at which creatures flee from players
 };
 
 // Shared world state - all objects exist on server
@@ -67,16 +59,11 @@ class Player {
         this.id = id;
         this.socket = socket;
         this.name = `Player_${id.substring(0, 6)}`;
-        
-        // Spawn near other players for PvP action
-        const spawnPos = this.getSpawnPosition();
-        this.x = spawnPos.x;
-        this.y = spawnPos.y;
-        this.z = spawnPos.z;
-        this.spawnRotation = spawnPos.rotation; // Look towards nearest player
-        
+        this.x = (Math.random() - 0.5) * 100; // Spawn closer together for competition
+        this.y = (Math.random() - 0.5) * 100;
+        this.z = (Math.random() - 0.5) * 100;
         this.rotationX = 0;
-        this.rotationY = spawnPos.rotation || 0;
+        this.rotationY = 0;
         this.color = Math.floor(Math.random() * 0xffffff);
         this.radiationLevel = 0;
         this.score = 0;
@@ -90,44 +77,6 @@ class Player {
         this.resourcesStolen = 0;
         this.resourcesLost = 0;
         this.nearbyPlayers = [];
-        
-        // 🔧 PVP TRACKING
-        this.kills = 0;
-        this.deaths = 0;
-        this.lastDeathTime = 0;
-        this.radiationFromPlayers = 0; // Track radiation caused by nearby players
-    }
-
-    getSpawnPosition() {
-        const otherPlayers = Object.values(players);
-        
-        if (otherPlayers.length === 0) {
-            // First player spawns at origin
-            return { x: 0, y: 0, z: 0, rotation: 0 };
-        }
-        
-        // Find a random existing player to spawn near
-        const targetPlayer = otherPlayers[Math.floor(Math.random() * otherPlayers.length)];
-        
-        // Generate position near target player but not too close
-        const angle = Math.random() * Math.PI * 2;
-        const distance = WORLD_SETTINGS.spawnDistance + Math.random() * (WORLD_SETTINGS.maxSpawnDistance - WORLD_SETTINGS.spawnDistance);
-        
-        const spawnX = targetPlayer.x + Math.cos(angle) * distance;
-        const spawnZ = targetPlayer.z + Math.sin(angle) * distance;
-        const spawnY = targetPlayer.y + (Math.random() - 0.5) * 100; // Some vertical variation
-        
-        // Calculate rotation to look towards target player
-        const lookDirection = Math.atan2(targetPlayer.z - spawnZ, targetPlayer.x - spawnX);
-        
-        console.log(`👶 ${this.name} spawning ${Math.round(distance)}m from ${targetPlayer.name}, looking towards them`);
-        
-        return {
-            x: spawnX,
-            y: spawnY,
-            z: spawnZ,
-            rotation: lookDirection
-        };
     }
 
     update(data) {
@@ -138,107 +87,6 @@ class Player {
         this.rotationY = data.rotationY || this.rotationY;
         this.radiationLevel = Math.min(100, (data.radiationLevel || this.radiationLevel));
         this.lastUpdate = Date.now();
-        
-        // Update radiation from nearby players
-        this.updateRadiationFromPlayers();
-        
-        // Check for radiation death
-        if (this.radiationLevel >= 100) {
-            this.handleRadiationDeath();
-        }
-    }
-
-    updateRadiationFromPlayers() {
-        this.radiationFromPlayers = 0;
-        this.nearbyPlayers = [];
-        
-        for (const [id, otherPlayer] of Object.entries(players)) {
-            if (id === this.id) continue;
-            
-            const distance = Math.sqrt(
-                Math.pow(otherPlayer.x - this.x, 2) +
-                Math.pow(otherPlayer.y - this.y, 2) +
-                Math.pow(otherPlayer.z - this.z, 2)
-            );
-            
-            if (distance <= WORLD_SETTINGS.radiationRange) {
-                // Radiation increases based on proximity (closer = more radiation)
-                const radiationFactor = 1 - (distance / WORLD_SETTINGS.radiationRange);
-                const radiationIncrease = WORLD_SETTINGS.radiationIncrease * radiationFactor;
-                this.radiationFromPlayers += radiationIncrease;
-                
-                this.nearbyPlayers.push({
-                    id: otherPlayer.id,
-                    name: otherPlayer.name,
-                    distance: Math.round(distance),
-                    radiationLevel: Math.round(otherPlayer.radiationLevel)
-                });
-                
-                // Debug logging for radiation
-                if (Math.random() < 0.01) { // 1% chance to log
-                    console.log(`☢️ ${this.name} getting ${radiationIncrease.toFixed(3)} radiation from ${otherPlayer.name} at ${Math.round(distance)}m (factor: ${radiationFactor.toFixed(2)})`);
-                }
-            }
-        }
-        
-        // Apply radiation from players to total radiation
-        if (this.radiationFromPlayers > 0) {
-            this.radiationLevel = Math.min(100, this.radiationLevel + this.radiationFromPlayers);
-        }
-    }
-
-    handleRadiationDeath() {
-        console.log(`💀 ${this.name} died from radiation poisoning! (Level: ${this.radiationLevel}%)`);
-        
-        this.deaths++;
-        this.lastDeathTime = Date.now();
-        
-        // Find nearby players who get radiation bonus
-        const nearbyPlayers = [];
-        for (const [id, otherPlayer] of Object.entries(players)) {
-            if (id === this.id) continue;
-            
-            const distance = Math.sqrt(
-                Math.pow(otherPlayer.x - this.x, 2) +
-                Math.pow(otherPlayer.y - this.y, 2) +
-                Math.pow(otherPlayer.z - this.z, 2)
-            );
-            
-            if (distance <= WORLD_SETTINGS.radiationRange * 1.5) { // Slightly larger range for death bonus
-                otherPlayer.radiationLevel = Math.max(0, otherPlayer.radiationLevel - WORLD_SETTINGS.deathRadiationBonus);
-                otherPlayer.kills++;
-                nearbyPlayers.push(otherPlayer);
-                console.log(`💚 ${otherPlayer.name} gained radiation cleanse from ${this.name}'s death! (-${WORLD_SETTINGS.deathRadiationBonus}% radiation, Kills: ${otherPlayer.kills})`);
-            }
-        }
-        
-        // Reset player state
-        this.radiationLevel = 0;
-        this.score = Math.max(0, this.score - 50); // Death penalty
-        
-        // Respawn at new location
-        const newSpawn = this.getSpawnPosition();
-        this.x = newSpawn.x;
-        this.y = newSpawn.y;
-        this.z = newSpawn.z;
-        this.rotationY = newSpawn.rotation;
-        
-        // Broadcast death event
-        io.emit('player_death', {
-            deadPlayer: this.name,
-            killers: nearbyPlayers.map(p => ({ name: p.name, newKills: p.kills })),
-            position: { x: this.x, y: this.y, z: this.z },
-            radiationBonus: WORLD_SETTINGS.deathRadiationBonus
-        });
-        
-        // Send respawn data to player
-        this.socket.emit('player_respawn', {
-            x: this.x,
-            y: this.y,
-            z: this.z,
-            rotation: this.rotationY,
-            message: `💀 You died from radiation! ${nearbyPlayers.length > 0 ? `${nearbyPlayers.length} nearby players got -${WORLD_SETTINGS.deathRadiationBonus}% radiation` : 'No one was nearby to benefit'}`
-        });
     }
 
     addScore(points, reason) {
@@ -257,16 +105,12 @@ class Player {
             rotationY: this.rotationY,
             color: this.color,
             radiationLevel: this.radiationLevel,
-            radiationFromPlayers: this.radiationFromPlayers,
             score: this.score,
             discoveries: this.discoveries,
             rareItems: this.rareItems,
             creatures: this.creatures,
             resourcesStolen: this.resourcesStolen,
-            resourcesLost: this.resourcesLost,
-            kills: this.kills,
-            deaths: this.deaths,
-            nearbyPlayers: this.nearbyPlayers
+            resourcesLost: this.resourcesLost
         };
     }
 }
@@ -323,8 +167,6 @@ class WorldObject {
             collectedBy: this.collectedBy,
             hue: this.hue,
             tentacleCount: this.tentacleCount,
-            fleeSpeed: this.fleeSpeed,
-            detectionRange: this.detectionRange,
             competingPlayers: this.competingPlayers.length
         };
     }
@@ -390,7 +232,7 @@ function generateWorld() {
 }
 
 // Get nearby players for competition
-function getNearbyPlayers(excludeId, x, y, z, range = 2000) { // Increased range to 2000m for better visibility
+function getNearbyPlayers(excludeId, x, y, z, range = 1000) {
     const nearby = [];
     const excludedPlayerName = players[excludeId] ? players[excludeId].name : 'unknown';
     
@@ -403,18 +245,13 @@ function getNearbyPlayers(excludeId, x, y, z, range = 2000) { // Increased range
             Math.pow(player.z - z, 2)
         );
         
-        console.log(`📏 Distance from ${excludedPlayerName} to ${player.name}: ${Math.round(distance)} (range: ${range})`);
-        
         if (distance <= range) {
             const playerData = player.toJSON();
             playerData.distance = Math.round(distance);
             nearby.push(playerData);
-            console.log(`✅ ${player.name} is within range - adding to nearby list (radiation: ${player.radiationLevel}%)`);
-        } else {
-            console.log(`❌ ${player.name} is too far (${Math.round(distance)} > ${range})`);
         }
     }
-    console.log(`📋 Total nearby players for ${excludedPlayerName}: ${nearby.length}`);
+    
     return nearby;
 }
 
@@ -589,8 +426,7 @@ io.on('connection', (socket) => {
         x: player.x,
         y: player.y,
         z: player.z,
-        color: player.color,
-        rotation: player.spawnRotation // Send spawn rotation to look at nearest player
+        color: player.color
     });
     
     // Send initial world state
@@ -615,11 +451,6 @@ io.on('connection', (socket) => {
         const nearbyPlayers = getNearbyPlayers(socket.id, player.x, player.y, player.z);
         const nearbyObjects = getNearbyObjects(socket.id, player.x, player.y, player.z);
         
-        // Debug logging for game state
-        if (Math.random() < 0.01) { // 1% chance to log
-            console.log(`🎮 Sending game state to ${player.name}: ${nearbyPlayers.length} players, ${nearbyObjects.length} objects, radiation: ${player.radiationLevel}% (${player.radiationFromPlayers}% from players)`);
-        }
-        
         // Send game state back to this player
         socket.emit('game_state', {
             players: nearbyPlayers,
@@ -631,21 +462,10 @@ io.on('connection', (socket) => {
                 rareItems: player.rareItems,
                 creatures: player.creatures,
                 radiationLevel: player.radiationLevel,
-                radiationFromPlayers: player.radiationFromPlayers,
                 resourcesStolen: player.resourcesStolen,
-                resourcesLost: player.resourcesLost,
-                kills: player.kills,
-                deaths: player.deaths,
-                nearbyPlayers: player.nearbyPlayers
+                resourcesLost: player.resourcesLost
             }
         });
-        
-        // Also send updated world objects (for creature movement)
-        if (Math.random() < 0.1) { // 10% chance to send world update (every ~1 second per player)
-            socket.emit('world_sync', {
-                objects: nearbyObjects
-            });
-        }
     });
     
     // Handle resource collection attempts
@@ -691,7 +511,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// World management loop - handle respawns, cleanup, and creature AI
+// World management loop - handle respawns and cleanup
 setInterval(() => {
     let respawnCount = 0;
     
@@ -699,57 +519,6 @@ setInterval(() => {
     worldObjects.forEach(obj => {
         if (obj.checkRespawn()) {
             respawnCount++;
-        }
-        
-        // Update creature AI - make them flee from players
-        if ((obj.type === 'spaceCreature' || obj.type === 'rare') && obj.available) {
-            let closestPlayer = null;
-            let closestDistance = Infinity;
-            
-            // Find closest player
-            for (const [id, player] of Object.entries(players)) {
-                const distance = Math.sqrt(
-                    Math.pow(player.x - obj.x, 2) +
-                    Math.pow(player.y - obj.y, 2) +
-                    Math.pow(player.z - obj.z, 2)
-                );
-                
-                if (distance < closestDistance) {
-                    closestDistance = distance;
-                    closestPlayer = player;
-                }
-            }
-            
-            // Make creature flee if player is too close
-            if (closestPlayer && closestDistance < WORLD_SETTINGS.creatureFleeDistance) {
-                const fleeSpeed = obj.type === 'spaceCreature' ? 2.0 : 1.5;
-                
-                // Calculate flee direction (away from player)
-                const fleeDir = {
-                    x: obj.x - closestPlayer.x,
-                    y: obj.y - closestPlayer.y,
-                    z: obj.z - closestPlayer.z
-                };
-                
-                // Normalize and apply flee speed
-                const length = Math.sqrt(fleeDir.x * fleeDir.x + fleeDir.y * fleeDir.y + fleeDir.z * fleeDir.z);
-                if (length > 0) {
-                    fleeDir.x = (fleeDir.x / length) * fleeSpeed;
-                    fleeDir.y = (fleeDir.y / length) * fleeSpeed * 0.5; // Less vertical movement
-                    fleeDir.z = (fleeDir.z / length) * fleeSpeed;
-                    
-                    // Update creature position
-                    obj.x += fleeDir.x;
-                    obj.y += fleeDir.y;
-                    obj.z += fleeDir.z;
-                    
-                    // Keep creatures within world bounds
-                    const halfWorld = WORLD_SETTINGS.worldSize / 2;
-                    obj.x = Math.max(-halfWorld, Math.min(halfWorld, obj.x));
-                    obj.z = Math.max(-halfWorld, Math.min(halfWorld, obj.z));
-                    obj.y = Math.max(-300, Math.min(300, obj.y));
-                }
-            }
         }
     });
     
@@ -771,7 +540,7 @@ setInterval(() => {
             delete players[id];
         }
     }
-}, 2000); // Check every 2 seconds for more responsive creature AI
+}, 5000); // Check every 5 seconds
 
 // Generate leaderboard
 function getLeaderboard() {
@@ -787,11 +556,7 @@ function getLeaderboard() {
             creatures: player.creatures,
             resourcesStolen: player.resourcesStolen,
             resourcesLost: player.resourcesLost,
-            kills: player.kills,
-            deaths: player.deaths,
-            kdr: player.deaths > 0 ? (player.kills / player.deaths).toFixed(2) : player.kills.toFixed(2),
-            survivalTime: Math.floor((Date.now() - player.joinTime) / 1000),
-            radiationLevel: Math.round(player.radiationLevel)
+            survivalTime: Math.floor((Date.now() - player.joinTime) / 1000)
         }));
     
     return sortedPlayers;
