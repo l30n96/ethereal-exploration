@@ -284,9 +284,11 @@
             
             socket.on('chat_message', (data) => {
                 console.log('💬 Chat message received:', data);
-                const displayName = data.playerId === playerId ? 'You' : data.playerName;
-                addChatMessage(displayName, data.message);
                 
+                // Always show the message regardless of who sent it
+                addChatMessage(data.playerName, data.message);
+                
+                // Show notification for other players' messages only
                 if (data.playerId !== playerId) {
                     showNotification(`💬 ${data.playerName}: ${data.message}`, 3000);
                 }
@@ -306,7 +308,8 @@
         }
         
         function updateOtherPlayers(players) {
-            console.log('👥 Updating other players:', players.map(p => p.name));
+            console.log('👥 Updating other players. Received:', players.length, 'players');
+            console.log('Player data:', players.map(p => ({name: p.name, pos: `(${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)})`, distance: p.distance})));
             
             // Remove old players
             for (const [id, playerObj] of otherPlayers) {
@@ -322,31 +325,47 @@
                 let playerObj = otherPlayers.get(playerData.id);
                 
                 if (!playerObj) {
-                    console.log(`➕ Adding new player ${playerData.name} at (${Math.round(playerData.x)}, ${Math.round(playerData.y)}, ${Math.round(playerData.z)})`);
+                    console.log(`➕ Creating new player mesh for ${playerData.name} at (${Math.round(playerData.x)}, ${Math.round(playerData.y)}, ${Math.round(playerData.z)})`);
                     
-                    // Create new player mesh
-                    const geometry = new THREE.CapsuleGeometry(3, 8, 4, 8);
+                    // Create larger, more visible player mesh
+                    const geometry = new THREE.CapsuleGeometry(5, 15, 4, 8); // Made bigger
                     const material = new THREE.MeshLambertMaterial({
                         color: playerData.color,
-                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.2)
+                        emissive: new THREE.Color(playerData.color).multiplyScalar(0.3) // Brighter
                     });
                     
                     const mesh = new THREE.Mesh(geometry, material);
                     mesh.position.set(playerData.x, playerData.y, playerData.z);
+                    
+                    // Add a glowing sphere on top for visibility
+                    const glowGeometry = new THREE.SphereGeometry(3);
+                    const glowMaterial = new THREE.MeshBasicMaterial({
+                        color: playerData.color,
+                        emissive: new THREE.Color(playerData.color)
+                    });
+                    const glowSphere = new THREE.Mesh(glowGeometry, glowMaterial);
+                    glowSphere.position.y = 12;
+                    mesh.add(glowSphere);
+                    
                     scene.add(mesh);
                     
                     playerObj = { mesh, data: playerData };
                     otherPlayers.set(playerData.id, playerObj);
                     
-                    showNotification(`${playerData.name} is nearby!`, 2000);
+                    showNotification(`${playerData.name} appeared nearby! (${playerData.distance}m away)`, 3000);
+                    addChatMessage('System', `${playerData.name} is ${playerData.distance}m away`);
                 } else {
                     // Update existing player position
+                    console.log(`🔄 Updating ${playerData.name} position to (${Math.round(playerData.x)}, ${Math.round(playerData.y)}, ${Math.round(playerData.z)})`);
                     playerObj.mesh.position.set(playerData.x, playerData.y, playerData.z);
                     playerObj.data = playerData;
                 }
             });
             
-            console.log(`👥 Total other players in scene: ${otherPlayers.size}`);
+            console.log(`👥 Total other players visible: ${otherPlayers.size}`);
+            
+            // Force a render update
+            renderer.render(scene, camera);
         }
         
         function updatePlayerDots(dots) {
@@ -521,8 +540,9 @@
                         const message = chatInput.value.trim();
                         if (message) {
                             if (socket && socket.connected) {
-                                console.log('📤 Sending chat message:', message);
+                                console.log('📤 Sending chat message:', message, 'to server');
                                 socket.emit('chat_message', { message });
+                                // Don't add message locally - wait for server echo
                             } else {
                                 console.log('❌ Not connected, cannot send chat');
                                 addChatMessage('You', message);
@@ -610,8 +630,9 @@
             
             // Send update to server (throttled)
             if (socket && socket.connected) {
-                // Send updates more frequently for better sync
-                if (Math.random() < 0.3) { // 30% chance = ~18 updates per second
+                // Send updates more frequently and add some logging
+                if (Math.random() < 0.2) { // 20% chance = ~12 updates per second
+                    console.log('📤 Sending position update:', {x: Math.round(player.x), y: Math.round(player.y), z: Math.round(player.z)});
                     socket.emit('player_update', {
                         x: player.x,
                         y: player.y,
