@@ -223,6 +223,23 @@
                 document.getElementById('gameStatus').textContent = 'Connected';
                 showNotification('Connected to multiplayer server!');
                 addChatMessage('System', 'Connected to server! You can now chat with other players.');
+                
+                // Add a test player for debugging (remove this later)
+                console.log('🧪 Adding test player for debugging...');
+                setTimeout(() => {
+                    const testPlayer = {
+                        id: 'test-player',
+                        name: 'TestPlayer',
+                        x: player.x + 50,
+                        y: player.y,
+                        z: player.z,
+                        color: 0xff0000,
+                        distance: 50
+                    };
+                    console.log('🧪 Creating test player:', testPlayer);
+                    updateOtherPlayers([testPlayer]);
+                    updatePlayerList([testPlayer]);
+                }, 2000);
             });
             
             socket.on('disconnect', () => {
@@ -265,28 +282,33 @@
             });
             
             socket.on('game_state', (data) => {
-                console.log('🎮 Game state received:', {
-                    nearbyPlayers: data.players ? data.players.length : 0,
-                    totalPlayers: data.totalPlayers,
-                    playerDots: data.playerDots ? data.playerDots.length : 0,
-                    yourPosition: data.yourPosition,
-                    playersData: data.players
-                });
+                console.log('🎮 ========== GAME STATE RECEIVED ==========');
+                console.log('Raw data:', data);
+                console.log('Players array:', data.players);
+                console.log('Players length:', data.players ? data.players.length : 'UNDEFINED');
+                console.log('Player dots:', data.playerDots);
+                console.log('Total players:', data.totalPlayers);
+                console.log('==========================================');
                 
-                // Log each player's details
-                if (data.players && data.players.length > 0) {
-                    console.log('👥 Player details received:');
-                    data.players.forEach(p => {
-                        console.log(`  - ${p.name}: (${Math.round(p.x)}, ${Math.round(p.y)}, ${Math.round(p.z)}) distance: ${p.distance}m`);
-                    });
+                if (!data) {
+                    console.log('❌ No data received in game_state');
+                    return;
                 }
                 
-                if (data.players) {
-                    updateOtherPlayers(data.players);
-                    updatePlayerList(data.players);
+                if (!data.players) {
+                    console.log('❌ No players array in game_state data');
+                    return;
+                }
+                
+                if (data.players.length === 0) {
+                    console.log('⚠️ Players array is empty');
                 } else {
-                    console.log('⚠️ No players data in game state');
+                    console.log('✅ Found players data, calling updateOtherPlayers...');
+                    updateOtherPlayers(data.players);
                 }
+                
+                console.log('🎯 Calling updatePlayerList...');
+                updatePlayerList(data.players);
                 
                 if (data.playerDots) {
                     updatePlayerDots(data.playerDots);
@@ -295,6 +317,8 @@
                 if (data.totalPlayers) {
                     updatePlayerCount(data.totalPlayers);
                 }
+                
+                console.log('🎮 ========== GAME STATE PROCESSING COMPLETE ==========');
             });
             
             socket.on('chat_message', (data) => {
@@ -411,27 +435,38 @@
         }
         
         function updatePlayerList(players) {
-            console.log('📝 Updating player list with', players.length, 'players');
+            console.log('📝 ========== UPDATE PLAYER LIST ==========');
+            console.log('Input players:', players);
+            console.log('Players length:', players ? players.length : 'UNDEFINED');
+            
             const playerList = document.getElementById('playerList');
+            console.log('Player list element:', playerList);
+            
             let html = '<div style="font-weight: bold; margin-bottom: 5px;">Other Players</div>';
             
-            if (!players || players.length === 0) {
+            if (!players) {
+                console.log('❌ Players is null/undefined');
+                html += '<div style="opacity: 0.7; font-size: 11px; color: red;">ERROR: No players data</div>';
+            } else if (players.length === 0) {
+                console.log('⚠️ Players array is empty');
                 html += '<div style="opacity: 0.7; font-size: 11px;">No other players nearby</div>';
-                console.log('📝 No players to show in list');
             } else {
-                console.log('📝 Adding players to list:', players.map(p => p.name));
-                players.forEach(p => {
+                console.log('✅ Processing players for display:', players.length);
+                players.forEach((p, index) => {
+                    console.log(`  Processing player ${index}:`, p);
+                    const colorHex = p.color ? p.color.toString(16).padStart(6, '0') : 'ffffff';
                     html += `
                         <div class="player-entry">
-                            <span style="color: #${p.color.toString(16).padStart(6, '0')}">${p.name}</span>
-                            <span>${p.distance}m away</span>
+                            <span style="color: #${colorHex}">${p.name || 'Unknown'}</span>
+                            <span>${p.distance || '?'}m away</span>
                         </div>
                     `;
                 });
             }
             
+            console.log('📝 Final HTML:', html);
             playerList.innerHTML = html;
-            console.log('📝 Player list HTML updated:', html);
+            console.log('📝 ========== PLAYER LIST UPDATED ==========');
         }
         
         function updateRadar() {
