@@ -492,6 +492,19 @@ io.on('connection', (socket) => {
             });
         }
         
+        // 🔧 WICHTIG: Broadcast object removal to ALL other players
+        if (result.success) {
+            const player = players[socket.id];
+            console.log(`📢 Broadcasting object ${data.objectId} collection by ${player?.name} to other players`);
+            
+            // Send to all OTHER players that this object was collected
+            socket.broadcast.emit('object_collected', {
+                objectId: data.objectId,
+                collectedBy: player?.name,
+                objectType: data.type || 'unknown'
+            });
+        }
+        
         console.log(`📦 Collection validation for ${players[socket.id]?.name}: ${result.success ? 'SUCCESS' : result.reason}`);
     });
     
