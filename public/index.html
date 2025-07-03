@@ -746,17 +746,24 @@ function animateObjects() {
                 }
             });
             
-            socket.on('object_collected', (data) => {
-                console.log('🗑️ Object collected by another player:', data);
+            socket.on('object_removed', (data) => {
+                console.log('🗑️ ========== OBJECT REMOVAL EVENT ==========');
+                console.log('Data received:', data);
+                console.log('Current objects count:', objects.length);
+                console.log('Looking for object ID:', data.objectId);
                 
-                // Find and remove the object that was collected by someone else
+                // Find and remove the object
                 const objectIndex = objects.findIndex(obj => obj.userData.serverId === data.objectId);
+                console.log('Found object at index:', objectIndex);
+                
                 if (objectIndex > -1) {
                     const obj = objects[objectIndex];
-                    
                     console.log(`🗑️ Removing ${data.objectType} collected by ${data.collectedBy}`);
                     
-                    // ⏰ KLEINE VERZÖGERUNG für smooth experience
+                    // Remove immediately for the collector, with small delay for others
+                    const isCollector = data.collectorId === playerId;
+                    const delay = isCollector ? 0 : 300; // Collector sees instant, others see 300ms delay
+                    
                     setTimeout(() => {
                         // Double-check object still exists
                         const currentIndex = objects.findIndex(o => o.userData.serverId === data.objectId);
@@ -765,17 +772,25 @@ function animateObjects() {
                             scene.remove(currentObj);
                             objects.splice(currentIndex, 1);
                             
-                            // Visual feedback
-                            showNotification(`${data.collectedBy} collected a ${data.objectType}`, 2000);
                             console.log(`✅ Successfully removed object ${data.objectId} from scene`);
+                            
+                            // Show notification (only for non-collectors)
+                            if (!isCollector) {
+                                showNotification(`${data.collectedBy} collected a ${data.objectType} (+${data.points})`, 2500);
+                            }
                         } else {
                             console.log(`⚠️ Object ${data.objectId} already removed`);
                         }
-                    }, 500); // 500ms delay - schneller aber immer noch smooth
+                    }, delay);
                 } else {
                     console.log(`❌ Object ${data.objectId} not found in local objects`);
-                    console.log('Available objects:', objects.map(o => ({ id: o.userData.serverId, type: o.userData.type })));
+                    console.log('Available objects:', objects.map(o => ({ 
+                        id: o.userData.serverId, 
+                        type: o.userData.type,
+                        position: { x: Math.round(o.position.x), y: Math.round(o.position.y), z: Math.round(o.position.z) }
+                    })));
                 }
+                console.log('===========================================');
             });
             
             socket.on('resource_stolen', (data) => {
