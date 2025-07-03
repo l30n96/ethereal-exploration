@@ -671,6 +671,12 @@ function animateObjects() {
             socket.on('game_state', (data) => {
                 if (!data) return;
                 
+                console.log('🎮 Game state received:', {
+                    players: data.players?.length,
+                    objects: data.objects?.length,
+                    totalPlayers: data.totalPlayers
+                });
+                
                 // ✅ MULTIPLAYER-INFOS
                 if (data.players) {
                     updateOtherPlayers(data.players);
@@ -681,8 +687,11 @@ function animateObjects() {
                 if (data.totalPlayers) updatePlayerCount(data.totalPlayers);
                 
                 // ✅ OBJEKT-SYNC WIEDER AKTIVIERT - aber intelligent
-                if (data.objects) {
+                if (data.objects && data.objects.length > 0) {
+                    console.log('📦 Processing object updates...', data.objects.length, 'objects from server');
                     updateNearbyObjects(data.objects);
+                } else {
+                    console.log('📦 No objects in game state');
                 }
                 
                 // ✅ COMPETITIVE STATS
@@ -737,16 +746,35 @@ function animateObjects() {
                 }
             });
             
-            socket.on('creature_moved', (data) => {
-                console.log('🏃 Creature moved:', data);
+            socket.on('object_collected', (data) => {
+                console.log('🗑️ Object collected by another player:', data);
                 
-                // Find the creature and update its position
-                const creature = objects.find(obj => obj.userData.serverId === data.objectId);
-                if (creature) {
-                    // Smooth movement update
-                    creature.position.set(data.newPosition.x, data.newPosition.y, data.newPosition.z);
-                    creature.userData.fleeing = data.fleeing;
-                    console.log(`🔄 Updated creature ${data.objectId} position from server`);
+                // Find and remove the object that was collected by someone else
+                const objectIndex = objects.findIndex(obj => obj.userData.serverId === data.objectId);
+                if (objectIndex > -1) {
+                    const obj = objects[objectIndex];
+                    
+                    console.log(`🗑️ Removing ${data.objectType} collected by ${data.collectedBy}`);
+                    
+                    // ⏰ KLEINE VERZÖGERUNG für smooth experience
+                    setTimeout(() => {
+                        // Double-check object still exists
+                        const currentIndex = objects.findIndex(o => o.userData.serverId === data.objectId);
+                        if (currentIndex > -1) {
+                            const currentObj = objects[currentIndex];
+                            scene.remove(currentObj);
+                            objects.splice(currentIndex, 1);
+                            
+                            // Visual feedback
+                            showNotification(`${data.collectedBy} collected a ${data.objectType}`, 2000);
+                            console.log(`✅ Successfully removed object ${data.objectId} from scene`);
+                        } else {
+                            console.log(`⚠️ Object ${data.objectId} already removed`);
+                        }
+                    }, 500); // 500ms delay - schneller aber immer noch smooth
+                } else {
+                    console.log(`❌ Object ${data.objectId} not found in local objects`);
+                    console.log('Available objects:', objects.map(o => ({ id: o.userData.serverId, type: o.userData.type })));
                 }
             });
             
@@ -797,24 +825,26 @@ function animateObjects() {
         }
         
         function syncWorldObjects(serverObjects) {
-            console.log('🔄 Syncing world objects from server...');
+            console.log('🔄 Syncing world objects from server...', serverObjects.length, 'objects received');
             
             // Clear existing local objects
             objects.forEach(obj => scene.remove(obj));
             objects = [];
             
-            // Create objects based on server data
+            // Create objects based on server data (only available ones)
+            let createdCount = 0;
             serverObjects.forEach(objData => {
                 if (objData.available) {
                     const obj = createObjectFromData(objData);
                     if (obj) {
                         scene.add(obj);
                         objects.push(obj);
+                        createdCount++;
                     }
                 }
             });
             
-            console.log(`✅ Synced ${objects.length} world objects`);
+            console.log(`✅ Synced ${createdCount} available world objects (${serverObjects.length - createdCount} were unavailable)`);
         }
         
         function createObjectFromData(objData) {
@@ -1002,7 +1032,7 @@ function animateObjects() {
         }
         
         function updateNearbyObjects(serverObjects) {
-            console.log('🔄 Smart object sync - checking server state...');
+            console.log('🔄 Smart object sync - checking server state...', serverObjects.length, 'objects');
             
             // ✅ INTELLIGENTE OBJEKT-SYNCHRONISATION
             // Objekte verschwinden nur wenn Server bestätigt, ABER nicht sofort
@@ -1012,18 +1042,19 @@ function animateObjects() {
                 
                 if (localObj && !serverObj.available && localObj.visible) {
                     // Objekt wurde von jemand anderem gesammelt
-                    console.log(`👻 Object ${serverObj.type} collected by another player - removing after delay`);
+                    console.log(`👻 Object ${serverObj.type} (ID: ${serverObj.id}) collected by another player - removing after delay`);
                     
                     // ⏰ KLEINE VERZÖGERUNG für smooth experience
                     setTimeout(() => {
-                        const currentObj = objects.find(obj => obj.userData.serverId === serverObj.id);
-                        if (currentObj) {
+                        const currentObjIndex = objects.findIndex(obj => obj.userData.serverId === serverObj.id);
+                        if (currentObjIndex > -1) {
+                            const currentObj = objects[currentObjIndex];
                             scene.remove(currentObj);
-                            const index = objects.indexOf(currentObj);
-                            if (index > -1) objects.splice(index, 1);
+                            objects.splice(currentObjIndex, 1);
                             
                             // Visual feedback
                             showNotification(`Another player collected a ${serverObj.type}`, 2000);
+                            console.log(`✅ Removed ${serverObj.type} (ID: ${serverObj.id}) from scene`);
                         }
                     }, 1000); // 1 second delay - nicht störend aber trotzdem sync
                 }
