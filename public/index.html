@@ -284,7 +284,7 @@
         
         <div class="controls">
             <div>WASD - Move | QE - Up/Down | Arrow Keys - Look | Shift - Boost</div>
-            <div>Enter - Chat | R - Reset | M - Music | S - Scoreboard</div>
+            <div>Enter - Chat | R - Reset | M - Music | V - Voice | S - Scoreboard</div>
         </div>
         
         <div class="chat-container">
@@ -333,7 +333,7 @@
         <p style="text-align: center; max-width: 600px; margin: 20px;">
             Explore infinite space filled with discoveries, exploding creatures, rare entities, and mysterious space creatures!
             But beware - cosmic radiation builds up as you explore. Find the green ring portals to cleanse yourself!
-            Chat and interact with other players in real-time!
+            Chat and interact with other players in real-time - now with voice synthesis!
         </p>
         <button class="start-button" onclick="startGame()">Begin Journey</button>
     </div>
@@ -360,6 +360,89 @@
         let audioContext, masterGain;
         let musicPlaying = false;
         let ambientOscillators = [];
+        
+        // 🎤 Text-to-Speech for chat
+        let speechSynthesis = window.speechSynthesis;
+        let availableVoices = [];
+        let chatTTSEnabled = true;
+        
+        // Load available voices
+        function loadVoices() {
+            availableVoices = speechSynthesis.getVoices();
+            console.log('🎤 Available voices:', availableVoices.length);
+            
+            // Filter out system voices and keep interesting ones
+            availableVoices = availableVoices.filter(voice => {
+                // Keep English voices and some interesting international ones
+                return voice.lang.startsWith('en') || 
+                       voice.lang.includes('fr') || 
+                       voice.lang.includes('de') || 
+                       voice.lang.includes('it') || 
+                       voice.lang.includes('es') ||
+                       voice.lang.includes('ja') ||
+                       voice.lang.includes('ru');
+            });
+            
+            console.log('🎤 Filtered voices:', availableVoices.length);
+        }
+        
+        // Initialize voices (some browsers need this)
+        speechSynthesis.onvoiceschanged = loadVoices;
+        loadVoices();
+        
+        function speakChatMessage(playerName, message) {
+            if (!chatTTSEnabled || !speechSynthesis || availableVoices.length === 0) return;
+            
+            // Don't speak system messages or own messages
+            if (playerName === 'System' || playerName === 'You') return;
+            
+            // Create speech utterance
+            const utterance = new SpeechSynthesisUtterance(message);
+            
+            // 🎲 Random voice selection
+            const randomVoice = availableVoices[Math.floor(Math.random() * availableVoices.length)];
+            utterance.voice = randomVoice;
+            
+            // 🎵 Random pitch and rate for variety
+            utterance.pitch = 0.6 + Math.random() * 0.8; // 0.6 to 1.4
+            utterance.rate = 0.7 + Math.random() * 0.6;  // 0.7 to 1.3
+            utterance.volume = 0.6 + Math.random() * 0.3; // 0.6 to 0.9
+            
+            // 🎭 Sometimes make it extra weird
+            if (Math.random() < 0.1) { // 10% chance
+                utterance.pitch = 0.3 + Math.random() * 1.4; // Very wide range
+                utterance.rate = 0.5 + Math.random() * 1.0;  // Slow to fast
+            }
+            
+            // 🎨 Visual feedback while speaking
+            const notificationText = `🎤 ${playerName} (${randomVoice.name.split(' ')[0]})`;
+            showNotification(notificationText, 2000);
+            
+            // Error handling
+            utterance.onerror = (event) => {
+                console.warn('🎤 Speech error:', event.error);
+            };
+            
+            utterance.onstart = () => {
+                console.log(`🎤 Speaking: "${message}" in ${randomVoice.name} voice`);
+            };
+            
+            // Cancel any ongoing speech and speak new message
+            speechSynthesis.cancel();
+            speechSynthesis.speak(utterance);
+        }
+        
+        function toggleChatTTS() {
+            chatTTSEnabled = !chatTTSEnabled;
+            if (chatTTSEnabled) {
+                showNotification('🎤 Chat voice enabled!', 2000);
+                addChatMessage('System', 'Chat voice enabled! Messages will be spoken aloud.');
+            } else {
+                showNotification('🔇 Chat voice disabled', 2000);
+                addChatMessage('System', 'Chat voice disabled.');
+                speechSynthesis.cancel(); // Stop any ongoing speech
+            }
+        }
         
         // Radiation system - CHANGE THESE VALUES TO ADJUST RADIATION
         let radiationLevel = 0;
@@ -557,6 +640,10 @@
             socket.on('chat_message', (data) => {
                 console.log('💬 Chat message received:', data);
                 addChatMessage(data.playerName, data.message);
+                
+                // 🎤 Speak the message with random voice!
+                speakChatMessage(data.playerName, data.message);
+                
                 if (data.playerId !== playerId) {
                     showNotification(`💬 ${data.playerName}: ${data.message}`, 3000);
                 }
@@ -1028,7 +1115,10 @@
                 minute: '2-digit' 
             });
             
-            messageElement.innerHTML = `<span style="color: #666; font-size: 10px;">[${timestamp}]</span> <strong style="color: #4ecdc4">${playerName}:</strong> ${message}`;
+            // Add voice indicator for TTS-enabled messages
+            const voiceIndicator = (chatTTSEnabled && playerName !== 'System' && playerName !== 'You') ? '🎤 ' : '';
+            
+            messageElement.innerHTML = `<span style="color: #666; font-size: 10px;">[${timestamp}]</span> ${voiceIndicator}<strong style="color: #4ecdc4">${playerName}:</strong> ${message}`;
             messageElement.style.marginBottom = '3px';
             messageElement.style.wordWrap = 'break-word';
             
@@ -1428,6 +1518,7 @@
                 }
                 
                 if (e.code === 'KeyM') toggleMusic();
+                if (e.code === 'KeyV') toggleChatTTS(); // 🎤 V key for voice toggle
                 
                 if (e.code === 'KeyS' && !gameStarted) {
                     if (document.getElementById('scoreboardScreen').style.display === 'flex') {
