@@ -137,6 +137,7 @@ class WorldObject {
             this.detectionRange = 80 + Math.random() * 40;
             this.fleeing = false;
             this.fleeDirection = { x: 0, y: 0, z: 0 };
+            this.lastTrajectoryUpdate = Date.now();
         } else if (type === 'rare') {
             this.fleeSpeed = 0.6; // 🔧 Rare entities also slower
         }
@@ -475,10 +476,57 @@ io.on('connection', (socket) => {
         });
     });
     
-    // Handle resource collection attempts
+    // Handle resource collection attempts (now for validation only)
     socket.on('collect_resource', (data) => {
         const result = handleResourceCollection(socket.id, data.objectId);
-        socket.emit('collection_result', result);
+        
+        // Send result back for competitive features (theft detection)
+        if (!result.success && result.reason === 'stolen') {
+            socket.emit('collection_result', result);
+        } else if (result.success && result.competitorCount > 0) {
+            // Notify about successful collection despite competition
+            socket.emit('collection_result', { 
+                success: true, 
+                competitorCount: result.competitorCount,
+                message: `Collected despite ${result.competitorCount} competitors nearby!`
+            });
+        }
+        
+        console.log(`📦 Collection validation for ${players[socket.id]?.name}: ${result.success ? 'SUCCESS' : result.reason}`);
+    });
+    
+    // Handle creature trajectory updates from clients
+    socket.on('creature_trajectory', (data) => {
+        const obj = worldObjects.find(o => o.id === data.objectId);
+        const player = players[socket.id];
+        
+        if (obj && player && obj.available) {
+            // Update creature position on server with trajectory
+            obj.x = data.startPosition.x;
+            obj.y = data.startPosition.y;
+            obj.z = data.startPosition.z;
+            obj.fleeing = data.fleeing;
+            obj.fleeDirection = data.fleeDirection;
+            obj.lastTrajectoryUpdate = data.timestamp;
+            
+            // Broadcast trajectory to other nearby players
+            const nearbyPlayers = getNearbyPlayers(socket.id, player.x, player.y, player.z, 800);
+            nearbyPlayers.forEach(nearbyPlayer => {
+                const targetPlayer = players[nearbyPlayer.id];
+                if (targetPlayer && targetPlayer.socket) {
+                    targetPlayer.socket.emit('creature_trajectory', {
+                        objectId: data.objectId,
+                        startPosition: data.startPosition,
+                        fleeDirection: data.fleeDirection,
+                        fleeSpeed: data.fleeSpeed,
+                        timestamp: data.timestamp,
+                        fleeing: data.fleeing
+                    });
+                }
+            });
+            
+            console.log(`🎯 ${obj.type} ${obj.id} trajectory updated by ${player.name} - broadcast to ${nearbyPlayers.length} players`);
+        }
     });
     
     // Handle chat messages
