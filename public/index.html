@@ -584,16 +584,18 @@
                 if (data.players) {
                     updateOtherPlayers(data.players);
                     updatePlayerList(data.players);
-                    updatePlayerDots(data.players); // Fix: Use players data for radar
+                    updatePlayerDots(data.players);
                 }
                 
-                if (data.objects) {
-                    updateNearbyObjects(data.objects);
-                }
+                // 🚫 OBJEKT-UPDATES DEAKTIVIERT für bessere Performance
+                // if (data.objects) {
+                //     updateNearbyObjects(data.objects);
+                // }
                 
-                if (data.yourStats) {
-                    updatePlayerStats(data.yourStats);
-                }
+                // 🚫 SERVER STATS DEAKTIVIERT - Alles client-side für sofortiges Feedback
+                // if (data.yourStats) {
+                //     updatePlayerStats(data.yourStats);
+                // }
                 
                 if (data.totalPlayers) updatePlayerCount(data.totalPlayers);
             });
@@ -715,7 +717,8 @@
             
             if (obj) {
                 obj.userData.serverId = objData.id;
-                obj.userData.serverManaged = true;
+                // 🚫 KEIN serverManaged Flag mehr - alles ist client-side!
+                console.log(`✅ Created ${objData.type} with client-side management`);
             }
             
             return obj;
@@ -874,6 +877,12 @@
         }
         
         function updateNearbyObjects(serverObjects) {
+            // 🚫 DEAKTIVIERT - Wir wollen KEINE Server-Updates für Objekte mehr!
+            // Server soll nur für Diebstahl-Validierung verwendet werden
+            console.log('📦 Server object update received but ignored for client performance');
+            
+            /* 
+            ALTE LOGIK AUSKOMMENTIERT:
             // This function updates the visual state of nearby objects
             // based on server data (like if they've been collected by others)
             serverObjects.forEach(serverObj => {
@@ -886,6 +895,7 @@
                     console.log(`👻 Object ${serverObj.type} removed - collected by someone else`);
                 }
             });
+            */
         }
         
         function updatePlayerStats(stats) {
