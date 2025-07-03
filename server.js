@@ -133,10 +133,12 @@ class WorldObject {
             this.hue = Math.random();
         } else if (type === 'spaceCreature') {
             this.tentacleCount = 3 + Math.floor(Math.random() * 5);
-            this.fleeSpeed = 1.1 + Math.random() * 0.3;
+            this.fleeSpeed = 0.7 + Math.random() * 0.2; // 🔧 Slower flee speed (0.7-0.9 vs player 1.0-2.0)
             this.detectionRange = 80 + Math.random() * 40;
+            this.fleeing = false;
+            this.fleeDirection = { x: 0, y: 0, z: 0 };
         } else if (type === 'rare') {
-            this.fleeSpeed = 0.8;
+            this.fleeSpeed = 0.6; // 🔧 Rare entities also slower
         }
     }
 
@@ -385,6 +387,11 @@ function handleResourceCollection(playerId, objectId) {
     if (obj.type === 'ringPortal') {
         radiationReduction = 25 + Math.random() * 15;
         player.radiationLevel = Math.max(0, player.radiationLevel - radiationReduction);
+        
+        // Portals are consumed when used - mark as collected
+        obj.available = false;
+        obj.collectedBy = playerId;
+        obj.collectedAt = Date.now();
     }
 
     // Broadcast the collection
