@@ -600,19 +600,26 @@
             
             socket.on('collection_result', (data) => {
                 console.log('🎯 Collection result:', data);
-                if (data.success) {
-                    addScore(data.points);
-                    playSound(440);
-                    showNotification(`+${data.points} points! ${data.competitorCount > 0 ? `Beat ${data.competitorCount} competitors!` : ''}`);
-                    
-                    if (data.radiationReduction > 0) {
-                        radiationLevel = Math.max(0, radiationLevel - data.radiationReduction);
-                        showNotification(`Portal used! Radiation reduced by ${Math.round(data.radiationReduction)}%`);
-                    }
-                } else if (data.reason === 'stolen') {
-                    playSound(150); // Lower pitched disappointment sound
+                // Only handle theft scenarios now, since collection is client-side
+                if (!data.success && data.reason === 'stolen') {
+                    playSound(150); // Disappointment sound
                     showNotification(`😤 ${data.stolenBy} stole your resource! (They were ${data.thiefDistance}m away, you were ${data.yourDistance}m)`, 5000);
                     addChatMessage('System', `🏴‍☠️ ${data.stolenBy} stole a resource from you!`);
+                } else if (data.success && data.competitorCount > 0) {
+                    showNotification(`💪 ${data.message}`, 3000);
+                }
+            });
+            
+            socket.on('creature_moved', (data) => {
+                console.log('🏃 Creature moved:', data);
+                
+                // Find the creature and update its position
+                const creature = objects.find(obj => obj.userData.serverId === data.objectId);
+                if (creature) {
+                    // Smooth movement update
+                    creature.position.set(data.newPosition.x, data.newPosition.y, data.newPosition.z);
+                    creature.userData.fleeing = data.fleeing;
+                    console.log(`🔄 Updated creature ${data.objectId} position from server`);
                 }
             });
             
@@ -2175,46 +2182,33 @@
             document.getElementById('coords').textContent = 
                 `${Math.round(player.x)}, ${Math.round(player.y)}, ${Math.round(player.z)}`;
             
-            // If connected to server, server manages score - otherwise calculate locally
-            if (socket && socket.connected) {
-                // Server will update these via updatePlayerStats()
-                // Just update the radiation display color
-                const radiationElement = document.getElementById('radiation');
-                if (radiationLevel < 30) {
-                    radiationElement.style.color = '#4ecdc4';
-                } else if (radiationLevel < 60) {
-                    radiationElement.style.color = '#ffd93d';
-                } else if (radiationLevel < 85) {
-                    radiationElement.style.color = '#ff6b6b';
-                } else {
-                    radiationElement.style.color = '#ff0000';
-                    radiationElement.style.textShadow = '0 0 10px #ff0000';
-                }
+            // Always calculate and show local score for immediate feedback
+            const currentSurvivalScore = Math.floor(survivalTime / 1000) * POINTS.survivalBonus;
+            const currentScore = discoveries * POINTS.discovery + 
+                               rareItems * POINTS.rareEntity + 
+                               creaturesFound * POINTS.spaceCreature + 
+                               currentSurvivalScore;
+            
+            document.getElementById('score').textContent = currentScore;
+            document.getElementById('discoveries').textContent = discoveries;
+            document.getElementById('rare').textContent = rareItems;
+            document.getElementById('creatures').textContent = creaturesFound;
+            document.getElementById('radiation').textContent = Math.round(radiationLevel);
+            
+            // Update radiation color
+            const radiationElement = document.getElementById('radiation');
+            if (radiationLevel < 30) {
+                radiationElement.style.color = '#4ecdc4';
+                radiationElement.style.textShadow = 'none';
+            } else if (radiationLevel < 60) {
+                radiationElement.style.color = '#ffd93d';
+                radiationElement.style.textShadow = 'none';
+            } else if (radiationLevel < 85) {
+                radiationElement.style.color = '#ff6b6b';
+                radiationElement.style.textShadow = 'none';
             } else {
-                // Local/offline mode - calculate score locally
-                const currentSurvivalScore = Math.floor(survivalTime / 1000) * POINTS.survivalBonus;
-                const currentScore = discoveries * POINTS.discovery + 
-                                   rareItems * POINTS.rareEntity + 
-                                   creaturesFound * POINTS.spaceCreature + 
-                                   currentSurvivalScore;
-                
-                document.getElementById('score').textContent = currentScore;
-                document.getElementById('discoveries').textContent = discoveries;
-                document.getElementById('rare').textContent = rareItems;
-                document.getElementById('creatures').textContent = creaturesFound;
-                document.getElementById('radiation').textContent = Math.round(radiationLevel);
-                
-                const radiationElement = document.getElementById('radiation');
-                if (radiationLevel < 30) {
-                    radiationElement.style.color = '#4ecdc4';
-                } else if (radiationLevel < 60) {
-                    radiationElement.style.color = '#ffd93d';
-                } else if (radiationLevel < 85) {
-                    radiationElement.style.color = '#ff6b6b';
-                } else {
-                    radiationElement.style.color = '#ff0000';
-                    radiationElement.style.textShadow = '0 0 10px #ff0000';
-                }
+                radiationElement.style.color = '#ff0000';
+                radiationElement.style.textShadow = '0 0 10px #ff0000';
             }
         }
         
