@@ -1,4 +1,94 @@
-<!DOCTYPE html>
+function animateObjects() {
+            const time = Date.now() * 0.001;
+            
+            objects.forEach((obj, index) => {
+                // ✅ TRAJECTORY PREDICTION für creatures von anderen Spielern
+                if (obj.userData.trajectory && obj.userData.fleeing) {
+                    const timeSinceUpdate = (Date.now() - obj.userData.trajectory.lastUpdate) / 1000;
+                    if (timeSinceUpdate < 5) { // 5 seconds max prediction
+                        const prediction = new THREE.Vector3(
+                            obj.userData.trajectory.direction.x * obj.userData.trajectory.speed,
+                            obj.userData.trajectory.direction.y * obj.userData.trajectory.speed,
+                            obj.userData.trajectory.direction.z * obj.userData.trajectory.speed
+                        );
+                        obj.position.add(prediction);
+                    }
+                }
+                
+                if (obj.userData.type === 'exploding') {
+                    obj.position.y = obj.userData.originalY + Math.sin(time * 2) * 8;
+                    obj.rotation.x += obj.userData.rotSpeed;
+                    obj.rotation.y += obj.userData.rotSpeed * 0.7;
+                }
+                
+                else if (obj.userData.type === 'ringPortal') {
+                    obj.rotation.y += 0.01;
+                    if (obj.children[1]) {
+                        obj.children[1].rotation.y -= 0.015;
+                    }
+                }
+                
+                else if (obj.userData.type === 'shard') {
+                    obj.position.add(obj.userData.velocity);
+                    obj.userData.velocity.y -= 0.05;
+                    obj.userData.velocity.multiplyScalar(0.98);
+                    
+                    obj.userData.life -= 0.01;
+                    obj.material.opacity = obj.userData.life;
+                    
+                    if (obj.userData.life <= 0) {
+                        scene.remove(obj);
+                        objects.splice(index, 1);
+                    }
+                }
+            });
+        }obj.userData.type === 'rare') {
+                    obj.position.y = obj.userData.originalY + Math.sin(time * 1.5) * 5;
+                    obj.rotation.y += 0.02;
+                }
+                
+                else if (obj.userData.type === 'discovery') {
+                    obj.rotation.y += 0.01;
+                }
+                
+                else if (obj.userData.type === 'spaceCreature') {
+                    obj.position.y = obj.userData.originalY + Math.sin(time * obj.userData.swimSpeed) * 10;
+                    
+                    if (obj.userData.fleeing) {
+                        // 🔧 PANIC ANIMATION - Fast wobbling tentacles when fleeing
+                        obj.rotation.y += 0.15 * Math.sin(time * 10); // More erratic rotation
+                        obj.rotation.x += 0.08 * Math.cos(time * 8);
+                        
+                        // Very fast tentacle movement - panic wobbling!
+                        for (let i = 1; i <= obj.userData.tentacleCount; i++) {
+                            if (obj.children[i]) {
+                                obj.children[i].rotation.x = Math.sin(time * 12 + i) * 1.2; // Faster and more extreme
+                                obj.children[i].rotation.z = Math.cos(time * 10 + i) * 0.9;
+                                // Add some random jitter to make it look panicked
+                                obj.children[i].rotation.y = Math.sin(time * 15 + i * 2) * 0.4;
+                            }
+                        }
+                        
+                        // Body also wobbles when panicking
+                        if (obj.children[0]) {
+                            obj.children[0].rotation.x = Math.sin(time * 8) * 0.2;
+                            obj.children[0].rotation.z = Math.cos(time * 6) * 0.15;
+                        }
+                    } else {
+                        // Normal calm animation
+                        obj.rotation.y += 0.005;
+                        
+                        // Gentle tentacle movement when calm
+                        for (let i = 1; i <= obj.userData.tentacleCount; i++) {
+                            if (obj.children[i]) {
+                                obj.children[i].rotation.x = Math.sin(time * 3 + i) * 0.3;
+                                obj.children[i].rotation.z = Math.cos(time * 2 + i) * 0.2;
+                            }
+                        }
+                    }
+                }
+                
+                else if (<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -581,34 +671,69 @@
             socket.on('game_state', (data) => {
                 if (!data) return;
                 
+                // ✅ MULTIPLAYER-INFOS
                 if (data.players) {
                     updateOtherPlayers(data.players);
                     updatePlayerList(data.players);
                     updatePlayerDots(data.players);
                 }
                 
-                // 🚫 OBJEKT-UPDATES DEAKTIVIERT für bessere Performance
-                // if (data.objects) {
-                //     updateNearbyObjects(data.objects);
-                // }
-                
-                // 🚫 SERVER STATS DEAKTIVIERT - Alles client-side für sofortiges Feedback
-                // if (data.yourStats) {
-                //     updatePlayerStats(data.yourStats);
-                // }
-                
                 if (data.totalPlayers) updatePlayerCount(data.totalPlayers);
+                
+                // ✅ OBJEKT-SYNC WIEDER AKTIVIERT - aber intelligent
+                if (data.objects) {
+                    updateNearbyObjects(data.objects);
+                }
+                
+                // ✅ COMPETITIVE STATS
+                if (data.yourStats) {
+                    syncCompetitiveStats(data.yourStats);
+                }
+            });
+            
+            // Handle creature trajectory updates from other players
+            socket.on('creature_trajectory', (data) => {
+                console.log('🎯 Creature trajectory received:', data);
+                
+                const creature = objects.find(obj => obj.userData.serverId === data.objectId);
+                if (creature) {
+                    // Apply trajectory prediction
+                    const timeDiff = (Date.now() - data.timestamp) / 1000; // seconds
+                    const predictedPosition = {
+                        x: data.startPosition.x + (data.fleeDirection.x * timeDiff),
+                        y: data.startPosition.y + (data.fleeDirection.y * timeDiff),
+                        z: data.startPosition.z + (data.fleeDirection.z * timeDiff)
+                    };
+                    
+                    creature.position.set(predictedPosition.x, predictedPosition.y, predictedPosition.z);
+                    creature.userData.fleeing = data.fleeing;
+                    
+                    // Store trajectory for continued prediction
+                    creature.userData.trajectory = {
+                        direction: data.fleeDirection,
+                        speed: data.fleeSpeed,
+                        lastUpdate: Date.now()
+                    };
+                    
+                    console.log(`🏃 Applied trajectory to creature ${data.objectId}`);
+                }
             });
             
             socket.on('collection_result', (data) => {
                 console.log('🎯 Collection result:', data);
-                // Only handle theft scenarios now, since collection is client-side
+                
+                // ✅ THEFT DETECTION - Das ist wichtig für Competition!
                 if (!data.success && data.reason === 'stolen') {
-                    playSound(150); // Disappointment sound
+                    // Jemand hat uns etwas geklaut - rückgängig machen!
+                    playSound(150);
                     showNotification(`😤 ${data.stolenBy} stole your resource! (They were ${data.thiefDistance}m away, you were ${data.yourDistance}m)`, 5000);
                     addChatMessage('System', `🏴‍☠️ ${data.stolenBy} stole a resource from you!`);
+                    
+                    // ⚡ PUNKTE WIEDER ABZIEHEN da gestohlen
+                    score = Math.max(0, score - 10); // Grober Schätzwert, könnte verfeinert werden
+                    
                 } else if (data.success && data.competitorCount > 0) {
-                    showNotification(`💪 ${data.message}`, 3000);
+                    showNotification(`💪 Beat ${data.competitorCount} competitors!`, 3000);
                 }
             });
             
@@ -877,25 +1002,48 @@
         }
         
         function updateNearbyObjects(serverObjects) {
-            // 🚫 DEAKTIVIERT - Wir wollen KEINE Server-Updates für Objekte mehr!
-            // Server soll nur für Diebstahl-Validierung verwendet werden
-            console.log('📦 Server object update received but ignored for client performance');
+            console.log('🔄 Smart object sync - checking server state...');
             
-            /* 
-            ALTE LOGIK AUSKOMMENTIERT:
-            // This function updates the visual state of nearby objects
-            // based on server data (like if they've been collected by others)
+            // ✅ INTELLIGENTE OBJEKT-SYNCHRONISATION
+            // Objekte verschwinden nur wenn Server bestätigt, ABER nicht sofort
+            
             serverObjects.forEach(serverObj => {
                 const localObj = objects.find(obj => obj.userData.serverId === serverObj.id);
+                
                 if (localObj && !serverObj.available && localObj.visible) {
-                    // Object was collected by someone else - hide it locally
-                    scene.remove(localObj);
-                    const index = objects.indexOf(localObj);
-                    if (index > -1) objects.splice(index, 1);
-                    console.log(`👻 Object ${serverObj.type} removed - collected by someone else`);
+                    // Objekt wurde von jemand anderem gesammelt
+                    console.log(`👻 Object ${serverObj.type} collected by another player - removing after delay`);
+                    
+                    // ⏰ KLEINE VERZÖGERUNG für smooth experience
+                    setTimeout(() => {
+                        const currentObj = objects.find(obj => obj.userData.serverId === serverObj.id);
+                        if (currentObj) {
+                            scene.remove(currentObj);
+                            const index = objects.indexOf(currentObj);
+                            if (index > -1) objects.splice(index, 1);
+                            
+                            // Visual feedback
+                            showNotification(`Another player collected a ${serverObj.type}`, 2000);
+                        }
+                    }, 1000); // 1 second delay - nicht störend aber trotzdem sync
                 }
             });
-            */
+        }
+        
+        // Neue Funktion für competitive stats sync
+        function syncCompetitiveStats(serverStats) {
+            // Nur die Sachen syncen die für Competition wichtig sind
+            // Aber NICHT die basic stats überschreiben (discoveries, score, etc.)
+            
+            if (serverStats.resourcesStolen !== undefined) {
+                console.log(`🏴‍☠️ Resources stolen: ${serverStats.resourcesStolen}, lost: ${serverStats.resourcesLost}`);
+            }
+            
+            // Radiation level vom Server übernehmen falls es Abweichungen gibt
+            if (Math.abs(serverStats.radiationLevel - radiationLevel) > 5) {
+                console.log(`☢️ Radiation sync: client ${radiationLevel} -> server ${serverStats.radiationLevel}`);
+                radiationLevel = serverStats.radiationLevel;
+            }
         }
         
         function updatePlayerStats(stats) {
