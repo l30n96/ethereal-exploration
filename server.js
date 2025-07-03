@@ -1,4 +1,27 @@
-const express = require('express');
+// Broadcast world state to all players
+function broadcastWorldState() {
+    console.log(`📡 Broadcasting world state to ${Object.keys(players).length} players`);
+    
+    for (const [playerId, player] of Object.entries(players)) {
+        const nearbyPlayers = getNearbyPlayers(playerId, player.x, player.y, player.z);
+        const nearbyObjects = getNearbyObjects(playerId, player.x, player.y, player.z);
+        
+        player.socket.emit('game_state', {
+            players: nearbyPlayers,
+            objects: nearbyObjects,
+            totalPlayers: Object.keys(players).length,
+            yourStats: {
+                score: player.score,
+                discoveries: player.discoveries,
+                rareItems: player.rareItems,
+                creatures: player.creatures,
+                radiationLevel: player.radiationLevel,
+                resourcesStolen: player.resourcesStolen,
+                resourcesLost: player.resourcesLost
+            }
+        });
+    }
+}const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
@@ -71,6 +94,7 @@ class Player {
         this.rareItems = 0;
         this.creatures = 0;
         this.lastUpdate = Date.now();
+        this.lastBroadcast = 0; // For throttling broadcasts
         this.joinTime = Date.now();
         
         // Competition tracking
@@ -455,57 +479,78 @@ io.on('connection', (socket) => {
         
         player.update(data);
         
-        // Get nearby players and objects
-        const nearbyPlayers = getNearbyPlayers(socket.id, player.x, player.y, player.z);
-        const nearbyObjects = getNearbyObjects(socket.id, player.x, player.y, player.z);
-        
-        // Send game state back to this player
-        socket.emit('game_state', {
-            players: nearbyPlayers,
-            objects: nearbyObjects,
-            totalPlayers: Object.keys(players).length,
-            yourStats: {
-                score: player.score,
-                discoveries: player.discoveries,
-                rareItems: player.rareItems,
-                creatures: player.creatures,
-                radiationLevel: player.radiationLevel,
-                resourcesStolen: player.resourcesStolen,
-                resourcesLost: player.resourcesLost
-            }
-        });
+        // 📡 HÄUFIGERE WORLD STATE UPDATES für bessere Sync
+        // Nur alle 200ms statt bei jedem Update (weniger Server-Last aber trotzdem responsiv)
+        if (!player.lastBroadcast || Date.now() - player.lastBroadcast > 200) {
+            const nearbyPlayers = getNearbyPlayers(socket.id, player.x, player.y, player.z);
+            const nearbyObjects = getNearbyObjects(socket.id, player.x, player.y, player.z);
+            
+            // Send game state back to this player
+            socket.emit('game_state', {
+                players: nearbyPlayers,
+                objects: nearbyObjects,
+                totalPlayers: Object.keys(players).length,
+                yourStats: {
+                    score: player.score,
+                    discoveries: player.discoveries,
+                    rareItems: player.rareItems,
+                    creatures: player.creatures,
+                    radiationLevel: player.radiationLevel,
+                    resourcesStolen: player.resourcesStolen,
+                    resourcesLost: player.resourcesLost
+                }
+            });
+            
+            player.lastBroadcast = Date.now();
+        }
     });
     
-    // Handle resource collection attempts (now for validation only)
+    // Handle resource collection attempts with immediate broadcast
     socket.on('collect_resource', (data) => {
+        const player = players[socket.id];
+        const obj = worldObjects.find(o => o.id === data.objectId);
+        
+        if (!player || !obj) {
+            console.log(`❌ Collection failed: ${!player ? 'No player' : 'No object'}`);
+            return;
+        }
+        
+        console.log(`🎯 ${player.name} attempting to collect ${obj.type} (ID: ${data.objectId})`);
+        
+        // Immediate server-side collection processing
         const result = handleResourceCollection(socket.id, data.objectId);
         
-        // Send result back for competitive features (theft detection)
-        if (!result.success && result.reason === 'stolen') {
-            socket.emit('collection_result', result);
-        } else if (result.success && result.competitorCount > 0) {
-            // Notify about successful collection despite competition
-            socket.emit('collection_result', { 
-                success: true, 
-                competitorCount: result.competitorCount,
-                message: `Collected despite ${result.competitorCount} competitors nearby!`
-            });
-        }
-        
-        // 🔧 WICHTIG: Broadcast object removal to ALL other players
         if (result.success) {
-            const player = players[socket.id];
-            console.log(`📢 Broadcasting object ${data.objectId} collection by ${player?.name} to other players`);
+            console.log(`✅ ${player.name} successfully collected ${obj.type} - broadcasting to all players`);
             
-            // Send to all OTHER players that this object was collected
-            socket.broadcast.emit('object_collected', {
+            // 📢 SOFORT an ALLE Spieler senden (einschließlich dem Sammler für Bestätigung)
+            io.emit('object_removed', {
                 objectId: data.objectId,
-                collectedBy: player?.name,
-                objectType: data.type || 'unknown'
+                objectType: obj.type,
+                collectedBy: player.name,
+                collectorId: socket.id,
+                points: data.points || 10,
+                timestamp: Date.now()
             });
+            
+            // Competitive features
+            if (result.competitorCount > 0) {
+                socket.emit('collection_result', { 
+                    success: true, 
+                    competitorCount: result.competitorCount,
+                    message: `Beat ${result.competitorCount} competitors!`
+                });
+            }
+            
+        } else if (result.reason === 'stolen') {
+            console.log(`🏴‍☠️ ${player.name}'s collection was stolen by ${result.stolenBy}`);
+            socket.emit('collection_result', result);
         }
         
-        console.log(`📦 Collection validation for ${players[socket.id]?.name}: ${result.success ? 'SUCCESS' : result.reason}`);
+        // 📊 Broadcast updated world state immediately after any collection
+        setTimeout(() => {
+            broadcastWorldState();
+        }, 100);
     });
     
     // Handle creature trajectory updates from clients
