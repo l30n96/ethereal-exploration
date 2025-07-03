@@ -736,7 +736,7 @@
                 swimSpeed: 0.3 + Math.random() * 0.5,
                 touched: false,
                 tentacleCount: tentacleCount,
-                fleeSpeed: 1.1 + Math.random() * 0.3,
+                fleeSpeed: 0.7 + Math.random() * 0.2, // 🔧 Slower flee speed - catchable!
                 detectionRange: 80 + Math.random() * 40,
                 fleeing: false
             };
@@ -1744,17 +1744,10 @@
                     playPortalSound();
                     showNotification(`Portal Used! Radiation reduced by ${Math.round(reductionAmount)}% +${POINTS.portalUsed} points`);
                     
-                    obj.children.forEach(child => {
-                        if (child.material) {
-                            child.material.opacity *= 0.3;
-                        }
-                    });
-                    
-                    setTimeout(() => {
-                        scene.remove(obj);
-                        const index = objects.indexOf(obj);
-                        if (index > -1) objects.splice(index, 1);
-                    }, 1000);
+                    // 🔧 PORTALS VANISH IMMEDIATELY when used locally
+                    scene.remove(obj);
+                    const index = objects.indexOf(obj);
+                    if (index > -1) objects.splice(index, 1);
                 }
                 
                 // Rare entities flee
@@ -1850,21 +1843,30 @@
                     obj.position.y = obj.userData.originalY + Math.sin(time * obj.userData.swimSpeed) * 10;
                     
                     if (obj.userData.fleeing) {
-                        // Panic animation when fleeing
-                        obj.rotation.y += 0.1 * Math.sin(time * 8);
-                        obj.rotation.x += 0.05 * Math.cos(time * 6);
+                        // 🔧 PANIC ANIMATION - Fast wobbling tentacles when fleeing
+                        obj.rotation.y += 0.15 * Math.sin(time * 10); // More erratic rotation
+                        obj.rotation.x += 0.08 * Math.cos(time * 8);
                         
-                        // Fast tentacle movement
+                        // Very fast tentacle movement - panic wobbling!
                         for (let i = 1; i <= obj.userData.tentacleCount; i++) {
                             if (obj.children[i]) {
-                                obj.children[i].rotation.x = Math.sin(time * 8 + i) * 0.8;
-                                obj.children[i].rotation.z = Math.cos(time * 6 + i) * 0.6;
+                                obj.children[i].rotation.x = Math.sin(time * 12 + i) * 1.2; // Faster and more extreme
+                                obj.children[i].rotation.z = Math.cos(time * 10 + i) * 0.9;
+                                // Add some random jitter to make it look panicked
+                                obj.children[i].rotation.y = Math.sin(time * 15 + i * 2) * 0.4;
                             }
                         }
+                        
+                        // Body also wobbles when panicking
+                        if (obj.children[0]) {
+                            obj.children[0].rotation.x = Math.sin(time * 8) * 0.2;
+                            obj.children[0].rotation.z = Math.cos(time * 6) * 0.15;
+                        }
                     } else {
-                        // Normal animation
+                        // Normal calm animation
                         obj.rotation.y += 0.005;
                         
+                        // Gentle tentacle movement when calm
                         for (let i = 1; i <= obj.userData.tentacleCount; i++) {
                             if (obj.children[i]) {
                                 obj.children[i].rotation.x = Math.sin(time * 3 + i) * 0.3;
