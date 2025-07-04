@@ -1,4 +1,29 @@
-function animateObjects() {
+.proximity-countdown {
+            position: absolute; top: 30%; left: 50%; transform: translateX(-50%);
+            background: radial-gradient(circle, rgba(255,0,0,0.8) 0%, rgba(100,0,0,0.9) 100%);
+            border: 3px solid #ff0000; border-radius: 20px; padding: 30px;
+            text-align: center; z-index: 160; display: none;
+            animation: proximityPulse 1s infinite;
+        }
+        
+        @keyframes proximityPulse {
+            0%, 100% { transform: translateX(-50%) scale(1); }
+            50% { transform: translateX(-50%) scale(1.05); box-shadow: 0 0 30px #ff0000; }
+        }
+        
+        .proximity-timer {
+            font-size: 4em; color: #ffffff; margin-bottom: 10px;
+            text-shadow: 0 0 20px #ff0000; font-weight: bold;
+        }
+        
+        .proximity-text {
+            font-size: 1.2em; color: #ffcccc; margin-bottom: 5px;
+        }
+        
+        .player-indicators {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 90;
+        }        function animateObjects() {
             const time = Date.now() * 0.001;
             
             objects.forEach((obj, index) => {
@@ -365,6 +390,7 @@ function animateObjects() {
             <div>Creatures Found: <span id="creatures">0</span></div>
             <div>Players Online: <span id="playerCount">1</span></div>
             <div style="color: #ff6b6b;">Radiation: <span id="radiation">0</span>%</div>
+            <div id="speed-indicator" style="color: #4ecdc4; display: none;">+0% Speed</div>
         </div>
         
         <div class="player-list" id="playerList">
@@ -389,6 +415,16 @@ function animateObjects() {
         <div class="notification" id="notification">
             <div id="notifText">Welcome!</div>
         </div>
+        
+        <div class="proximity-countdown" id="proximityCountdown">
+            <div class="proximity-timer" id="proximityTimer">6</div>
+            <div class="proximity-text">PROXIMITY DANGER</div>
+            <div class="proximity-text" id="proximityTarget">Enemy Player Nearby</div>
+            <div class="proximity-text" id="proximityDistance">Distance: 25m</div>
+            <div style="font-size: 0.9em; margin-top: 10px; color: #ffaaaa;">Higher radiation dies!</div>
+        </div>
+        
+        <div class="player-indicators" id="playerIndicators"></div>
         
         <div class="jumpscare" id="jumpscare"></div>
         <div class="radiation-overlay" id="radiationOverlay"></div>
@@ -456,83 +492,15 @@ function animateObjects() {
         let availableVoices = [];
         let chatTTSEnabled = true;
         
-        // Load available voices
-        function loadVoices() {
-            availableVoices = speechSynthesis.getVoices();
-            console.log('🎤 Available voices:', availableVoices.length);
-            
-            // Filter out system voices and keep interesting ones
-            availableVoices = availableVoices.filter(voice => {
-                // Keep English voices and some interesting international ones
-                return voice.lang.startsWith('en') || 
-                       voice.lang.includes('fr') || 
-                       voice.lang.includes('de') || 
-                       voice.lang.includes('it') || 
-                       voice.lang.includes('es') ||
-                       voice.lang.includes('ja') ||
-                       voice.lang.includes('ru');
-            });
-            
-            console.log('🎤 Filtered voices:', availableVoices.length);
-        }
-        
-        // Initialize voices (some browsers need this)
-        speechSynthesis.onvoiceschanged = loadVoices;
-        loadVoices();
-        
-        function speakChatMessage(playerName, message) {
-            if (!chatTTSEnabled || !speechSynthesis || availableVoices.length === 0) return;
-            
-            // Don't speak system messages or own messages
-            if (playerName === 'System' || playerName === 'You') return;
-            
-            // Create speech utterance
-            const utterance = new SpeechSynthesisUtterance(message);
-            
-            // 🎲 Random voice selection
-            const randomVoice = availableVoices[Math.floor(Math.random() * availableVoices.length)];
-            utterance.voice = randomVoice;
-            
-            // 🎵 Random pitch and rate for variety
-            utterance.pitch = 0.6 + Math.random() * 0.8; // 0.6 to 1.4
-            utterance.rate = 0.7 + Math.random() * 0.6;  // 0.7 to 1.3
-            utterance.volume = 0.6 + Math.random() * 0.3; // 0.6 to 0.9
-            
-            // 🎭 Sometimes make it extra weird
-            if (Math.random() < 0.1) { // 10% chance
-                utterance.pitch = 0.3 + Math.random() * 1.4; // Very wide range
-                utterance.rate = 0.5 + Math.random() * 1.0;  // Slow to fast
-            }
-            
-            // 🎨 Visual feedback while speaking
-            const notificationText = `🎤 ${playerName} (${randomVoice.name.split(' ')[0]})`;
-            showNotification(notificationText, 2000);
-            
-            // Error handling
-            utterance.onerror = (event) => {
-                console.warn('🎤 Speech error:', event.error);
-            };
-            
-            utterance.onstart = () => {
-                console.log(`🎤 Speaking: "${message}" in ${randomVoice.name} voice`);
-            };
-            
-            // Cancel any ongoing speech and speak new message
-            speechSynthesis.cancel();
-            speechSynthesis.speak(utterance);
-        }
-        
-        function toggleChatTTS() {
-            chatTTSEnabled = !chatTTSEnabled;
-            if (chatTTSEnabled) {
-                showNotification('🎤 Chat voice enabled!', 2000);
-                addChatMessage('System', 'Chat voice enabled! Messages will be spoken aloud.');
-            } else {
-                showNotification('🔇 Chat voice disabled', 2000);
-                addChatMessage('System', 'Chat voice disabled.');
-                speechSynthesis.cancel(); // Stop any ongoing speech
-            }
-        }
+        // ⚡ NEW PVP SYSTEM VARIABLES
+        let baseSpeed = 1.0;
+        let currentSpeedMultiplier = 1.0;
+        let speedBoostEndTime = 0;
+        let proximityKillTimer = null;
+        let proximityKillStartTime = 0;
+        let isInProximityDanger = false;
+        let proximityWarningSound = null;
+        let proximityTarget = null;
         
         // Radiation system - CHANGE THESE VALUES TO ADJUST RADIATION
         let radiationLevel = 0;
@@ -540,7 +508,7 @@ function animateObjects() {
         let radiationRate = 0.02; // 🔧 RADIATION RATE: Lower = slower radiation buildup (0.02 = slow, 0.05 = fast)
         let lastJumpscareTime = 0;
         
-        // Scoring system
+        // Scoring system with speed bonuses
         const POINTS = {
             discovery: 10,
             explosion: 15,
@@ -550,6 +518,16 @@ function animateObjects() {
             survivalBonus: 2
         };
         
+        // 🔧 SPEED SYSTEM SETTINGS
+        const SPEED_SETTINGS = {
+            baseSpeed: 1.0,
+            boostSpeed: 3.5,           // Speed during item collection boost
+            boostDuration: 2000,       // 2 seconds boost after item collection
+            scoreSpeedBonus: 0.005,    // +0.5% speed per point
+            maxScoreSpeed: 2.5,        // Maximum speed from score bonus
+            proximityKillTime: 6000    // 6 seconds proximity kill timer
+        };
+        
         let gameStartTime = 0;
         let survivalTime = 0;
         
@@ -557,14 +535,14 @@ function animateObjects() {
         let otherPlayers = new Map();
         let playerDots = [];
         
-        // 🔧 WORLD GENERATION SETTINGS - CHANGE THESE VALUES
+        // 🔧 WORLD GENERATION SETTINGS - Only portals are synchronized
         const WORLD_SETTINGS = {
             discoveries: 60,
             explodingCreatures: 40,
             rareEntities: 15,
             spaceCreatures: 20,
-            ringPortals: 12, // 🔧 PORTAL COUNT: Change this number to adjust portal availability
-            viewDistance: 800, // 🔧 VIEWING DISTANCE: Reduced from 1000 to 800 for closer gameplay
+            ringPortals: 12, // 🔧 Only these are server-synchronized
+            viewDistance: 800,
             worldSize: 2500
         };
         
@@ -664,8 +642,9 @@ function animateObjects() {
             });
             
             socket.on('world_sync', (data) => {
-                console.log('🌍 World sync received:', data.objects.length, 'objects');
-                syncWorldObjects(data.objects);
+                console.log('🌍 World sync received - but ignoring for PvP mode');
+                // PvP mode generates everything locally for responsive gameplay
+                // Only portals will be synchronized via separate events
             });
             
             socket.on('game_state', (data) => {
@@ -673,7 +652,6 @@ function animateObjects() {
                 
                 console.log('🎮 Game state received:', {
                     players: data.players?.length,
-                    objects: data.objects?.length,
                     totalPlayers: data.totalPlayers
                 });
                 
@@ -686,18 +664,8 @@ function animateObjects() {
                 
                 if (data.totalPlayers) updatePlayerCount(data.totalPlayers);
                 
-                // ✅ OBJEKT-SYNC WIEDER AKTIVIERT - aber intelligent
-                if (data.objects && data.objects.length > 0) {
-                    console.log('📦 Processing object updates...', data.objects.length, 'objects from server');
-                    updateNearbyObjects(data.objects);
-                } else {
-                    console.log('📦 No objects in game state');
-                }
-                
-                // ✅ COMPETITIVE STATS
-                if (data.yourStats) {
-                    syncCompetitiveStats(data.yourStats);
-                }
+                // 🚫 NO OBJECT SYNC - Everything is local now except portals
+                // Objects are generated locally for responsive gameplay
             });
             
             // Handle creature trajectory updates from other players
@@ -746,51 +714,25 @@ function animateObjects() {
                 }
             });
             
-            socket.on('object_removed', (data) => {
-                console.log('🗑️ ========== OBJECT REMOVAL EVENT ==========');
-                console.log('Data received:', data);
-                console.log('Current objects count:', objects.length);
-                console.log('Looking for object ID:', data.objectId);
+            socket.on('portal_removed', (data) => {
+                console.log('🌀 Portal used by another player:', data);
                 
-                // Find and remove the object
-                const objectIndex = objects.findIndex(obj => obj.userData.serverId === data.objectId);
-                console.log('Found object at index:', objectIndex);
+                // Find and remove the portal that was used by someone else
+                const portalIndex = objects.findIndex(obj => 
+                    obj.userData.type === 'ringPortal' && 
+                    obj.userData.serverId === data.portalId
+                );
                 
-                if (objectIndex > -1) {
-                    const obj = objects[objectIndex];
-                    console.log(`🗑️ Removing ${data.objectType} collected by ${data.collectedBy}`);
+                if (portalIndex > -1) {
+                    const portal = objects[portalIndex];
+                    scene.remove(portal);
+                    objects.splice(portalIndex, 1);
                     
-                    // Remove immediately for the collector, with small delay for others
-                    const isCollector = data.collectorId === playerId;
-                    const delay = isCollector ? 0 : 300; // Collector sees instant, others see 300ms delay
-                    
-                    setTimeout(() => {
-                        // Double-check object still exists
-                        const currentIndex = objects.findIndex(o => o.userData.serverId === data.objectId);
-                        if (currentIndex > -1) {
-                            const currentObj = objects[currentIndex];
-                            scene.remove(currentObj);
-                            objects.splice(currentIndex, 1);
-                            
-                            console.log(`✅ Successfully removed object ${data.objectId} from scene`);
-                            
-                            // Show notification (only for non-collectors)
-                            if (!isCollector) {
-                                showNotification(`${data.collectedBy} collected a ${data.objectType} (+${data.points})`, 2500);
-                            }
-                        } else {
-                            console.log(`⚠️ Object ${data.objectId} already removed`);
-                        }
-                    }, delay);
+                    showNotification(`${data.usedBy} used a portal!`, 2000);
+                    console.log(`✅ Removed portal used by ${data.usedBy}`);
                 } else {
-                    console.log(`❌ Object ${data.objectId} not found in local objects`);
-                    console.log('Available objects:', objects.map(o => ({ 
-                        id: o.userData.serverId, 
-                        type: o.userData.type,
-                        position: { x: Math.round(o.position.x), y: Math.round(o.position.y), z: Math.round(o.position.z) }
-                    })));
+                    console.log(`❌ Portal ${data.portalId} not found locally`);
                 }
-                console.log('===========================================');
             });
             
             socket.on('resource_stolen', (data) => {
@@ -1047,33 +989,9 @@ function animateObjects() {
         }
         
         function updateNearbyObjects(serverObjects) {
-            console.log('🔄 Smart object sync - checking server state...', serverObjects.length, 'objects');
-            
-            // ✅ INTELLIGENTE OBJEKT-SYNCHRONISATION
-            // Objekte verschwinden nur wenn Server bestätigt, ABER nicht sofort
-            
-            serverObjects.forEach(serverObj => {
-                const localObj = objects.find(obj => obj.userData.serverId === serverObj.id);
-                
-                if (localObj && !serverObj.available && localObj.visible) {
-                    // Objekt wurde von jemand anderem gesammelt
-                    console.log(`👻 Object ${serverObj.type} (ID: ${serverObj.id}) collected by another player - removing after delay`);
-                    
-                    // ⏰ KLEINE VERZÖGERUNG für smooth experience
-                    setTimeout(() => {
-                        const currentObjIndex = objects.findIndex(obj => obj.userData.serverId === serverObj.id);
-                        if (currentObjIndex > -1) {
-                            const currentObj = objects[currentObjIndex];
-                            scene.remove(currentObj);
-                            objects.splice(currentObjIndex, 1);
-                            
-                            // Visual feedback
-                            showNotification(`Another player collected a ${serverObj.type}`, 2000);
-                            console.log(`✅ Removed ${serverObj.type} (ID: ${serverObj.id}) from scene`);
-                        }
-                    }, 1000); // 1 second delay - nicht störend aber trotzdem sync
-                }
-            });
+            // 🚫 DEAKTIVIERT - Server macht jetzt direkte object_removed events
+            // Diese Funktion wird nicht mehr für Object-Removal verwendet
+            console.log('📦 Server object state received (not used for removal anymore):', serverObjects.length, 'objects');
         }
         
         // Neue Funktion für competitive stats sync
@@ -1795,8 +1713,16 @@ function animateObjects() {
         function updatePlayer() {
             if (!gameStarted || chatFocused) return;
             
-            const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? 2.0 : 1.0;
-            const lookSpeed = 0.03;
+            // ⚡ UPDATE SPEED SYSTEM (with safety check)
+            if (typeof updateSpeedMultiplier === 'function') {
+                updateSpeedMultiplier();
+            } else {
+                currentSpeedMultiplier = 1.0; // Fallback
+            }
+            
+            // 🚀 FASTER CAMERA ROTATION
+            const lookSpeed = 0.05; // Increased from 0.03
+            const speed = currentSpeedMultiplier * (keys['ShiftLeft'] || keys['ShiftRight'] ? 2.0 : 1.0);
             
             // Update survival time and radiation
             const currentTime = Date.now();
@@ -1817,7 +1743,7 @@ function animateObjects() {
             const controlInvert = radiationLevel > 85 && Math.random() < 0.3 ? -1 : 1;
             const movementGlitch = radiationLevel > 70 && Math.random() < 0.1;
             
-            // Camera rotation
+            // Camera rotation - FASTER
             if (keys['ArrowLeft']) player.rotationY += lookSpeed * controlMultiplier * controlInvert;
             if (keys['ArrowRight']) player.rotationY -= lookSpeed * controlMultiplier * controlInvert;
             if (keys['ArrowUp']) player.rotationX += lookSpeed * controlMultiplier * controlInvert;
@@ -1838,7 +1764,7 @@ function animateObjects() {
             camera.rotation.y = player.rotationY;
             camera.rotation.x = player.rotationX;
             
-            // Movement
+            // Movement with new speed system
             const forward = new THREE.Vector3(0, 0, -1);
             const right = new THREE.Vector3(1, 0, 0);
             const up = new THREE.Vector3(0, 1, 0);
@@ -1891,6 +1817,16 @@ function animateObjects() {
             player.z += movement.z;
             
             camera.position.set(player.x, player.y, player.z);
+            
+            // 💀 CHECK PROXIMITY KILL (with safety check)
+            if (typeof checkProximityKill === 'function') {
+                checkProximityKill();
+            }
+            
+            // 🎯 UPDATE PLAYER DIRECTION INDICATORS (with safety check)
+            if (typeof updatePlayerDirectionIndicators === 'function') {
+                updatePlayerDirectionIndicators();
+            }
             
             checkInteractions();
             updateHUD();
@@ -2398,6 +2334,23 @@ function animateObjects() {
             document.getElementById('rare').textContent = rareItems;
             document.getElementById('creatures').textContent = creaturesFound;
             document.getElementById('radiation').textContent = Math.round(radiationLevel);
+            
+            // Update speed display (with safety check)
+            if (typeof updateSpeedDisplay === 'function') {
+                updateSpeedDisplay();
+            } else {
+                // Simple fallback speed display
+                const speedIndicator = document.getElementById('speed-indicator');
+                if (speedIndicator) {
+                    const speedPercent = Math.round((currentSpeedMultiplier - 1) * 100);
+                    if (speedPercent > 0) {
+                        speedIndicator.textContent = `+${speedPercent}% Speed`;
+                        speedIndicator.style.display = 'block';
+                    } else {
+                        speedIndicator.style.display = 'none';
+                    }
+                }
+            }
             
             // Update radiation color
             const radiationElement = document.getElementById('radiation');
