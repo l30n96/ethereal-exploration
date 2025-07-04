@@ -714,8 +714,46 @@
                 }
             });
             
+            socket.on('portal_sync', (data) => {
+                console.log('🌀 Portal sync received:', data.portals?.length, 'portals');
+                
+                // Clear existing portals and add server portals
+                objects = objects.filter(obj => obj.userData.type !== 'ringPortal');
+                
+                if (data.portals) {
+                    data.portals.forEach(portalData => {
+                        const portal = createRingPortalFromData(portalData);
+                        if (portal) {
+                            portal.userData.serverId = portalData.id;
+                            scene.add(portal);
+                            objects.push(portal);
+                        }
+                    });
+                    console.log('✅ Synced portals from server');
+                }
+            });
+            
+            socket.on('portal_result', (data) => {
+                console.log('🌀 Portal result:', data);
+                if (!data.success && data.reason === 'stolen') {
+                    playSound(150);
+                    showNotification(`😤 ${data.stolenBy} stole your portal!`, 4000);
+                    addChatMessage('System', `🏴‍☠️ ${data.stolenBy} stole a portal from you!`);
+                } else if (data.success && data.competitorCount > 0) {
+                    showNotification(`💪 Used portal despite ${data.competitorCount} competitors!`, 3000);
+                }
+            });
+            
+            socket.on('portal_stolen', (data) => {
+                console.log('🏴‍☠️ Portal stolen:', data);
+                addChatMessage('System', `🏴‍☠️ ${data.thief} stole a portal from ${data.victim}!`);
+                if (data.thief !== playerName && data.victim !== playerName) {
+                    showNotification(`🏴‍☠️ ${data.thief} stole from ${data.victim}!`, 3000);
+                }
+            });
+            
             socket.on('portal_removed', (data) => {
-                console.log('🌀 Portal used by another player:', data);
+                console.log('🌀 Portal removed by another player:', data);
                 
                 // Find and remove the portal that was used by someone else
                 const portalIndex = objects.findIndex(obj => 
