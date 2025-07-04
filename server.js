@@ -1,696 +1,466 @@
-// Broadcast world state to all players
-function broadcastWorldState() {
-    console.log(`📡 Broadcasting world state to ${Object.keys(players).length} players`);
+// 🔥 PVP SYSTEM FUNCTIONS
+
+// Load available voices
+function loadVoices() {
+    availableVoices = speechSynthesis.getVoices();
+    console.log('🎤 Available voices:', availableVoices.length);
     
-    for (const [playerId, player] of Object.entries(players)) {
-        const nearbyPlayers = getNearbyPlayers(playerId, player.x, player.y, player.z);
-        const nearbyObjects = getNearbyObjects(playerId, player.x, player.y, player.z);
-        
-        player.socket.emit('game_state', {
-            players: nearbyPlayers,
-            objects: nearbyObjects,
-            totalPlayers: Object.keys(players).length,
-            yourStats: {
-                score: player.score,
-                discoveries: player.discoveries,
-                rareItems: player.rareItems,
-                creatures: player.creatures,
-                radiationLevel: player.radiationLevel,
-                resourcesStolen: player.resourcesStolen,
-                resourcesLost: player.resourcesLost
-            }
-        });
-    }
-}const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const path = require('path');
-
-const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
-});
-
-// Serve static files
-app.use(express.static('public'));
-
-// Test endpoint
-app.get('/test', (req, res) => {
-    res.json({
-        status: 'Server is running',
-        players: Object.keys(players).length,
-        worldObjects: worldObjects.length,
-        time: new Date().toISOString()
+    // Filter out system voices and keep interesting ones
+    availableVoices = availableVoices.filter(voice => {
+        return voice.lang.startsWith('en') || 
+               voice.lang.includes('fr') || 
+               voice.lang.includes('de') || 
+               voice.lang.includes('it') || 
+               voice.lang.includes('es') ||
+               voice.lang.includes('ja') ||
+               voice.lang.includes('ru');
     });
-});
+    
+    console.log('🎤 Filtered voices:', availableVoices.length);
+}
 
-// 🔧 WORLD SETTINGS - ADJUST THESE VALUES
-const WORLD_SETTINGS = {
-    discoveries: 60,
-    explodingCreatures: 40,
-    rareEntities: 15,
-    spaceCreatures: 20,
-    ringPortals: 12,
-    worldSize: 2500,
-    respawnDelay: 30000, // 30 seconds to respawn collected objects
-    stealRadius: 100, // Distance within which players can compete for resources
-};
+// Initialize voices
+speechSynthesis.onvoiceschanged = loadVoices;
+loadVoices();
 
-// Shared world state - all objects exist on server
-let worldObjects = [];
-let objectIdCounter = 0;
-
-// Player storage
-const players = {};
-
-// Object types and their properties
-const OBJECT_TYPES = {
-    discovery: { points: 10, collectRadius: 30, respawnTime: 30000 },
-    exploding: { points: 15, collectRadius: 25, respawnTime: 45000 },
-    rare: { points: 50, collectRadius: 20, respawnTime: 120000 }, // 2 minutes for rare
-    spaceCreature: { points: 25, collectRadius: 35, respawnTime: 60000 },
-    ringPortal: { points: 5, collectRadius: 30, respawnTime: 180000 } // 3 minutes for portals
-};
-
-// Player class with competitive features
-class Player {
-    constructor(id, socket) {
-        this.id = id;
-        this.socket = socket;
-        this.name = `Player_${id.substring(0, 6)}`;
-        this.x = (Math.random() - 0.5) * 100; // Spawn closer together for competition
-        this.y = (Math.random() - 0.5) * 100;
-        this.z = (Math.random() - 0.5) * 100;
-        this.rotationX = 0;
-        this.rotationY = 0;
-        this.color = Math.floor(Math.random() * 0xffffff);
-        this.radiationLevel = 0;
-        this.score = 0;
-        this.discoveries = 0;
-        this.rareItems = 0;
-        this.creatures = 0;
-        this.lastUpdate = Date.now();
-        this.lastBroadcast = 0; // For throttling broadcasts
-        this.joinTime = Date.now();
-        
-        // Competition tracking
-        this.resourcesStolen = 0;
-        this.resourcesLost = 0;
-        this.nearbyPlayers = [];
+function speakChatMessage(playerName, message) {
+    if (!chatTTSEnabled || !speechSynthesis || availableVoices.length === 0) return;
+    if (playerName === 'System' || playerName === 'You') return;
+    
+    const utterance = new SpeechSynthesisUtterance(message);
+    const randomVoice = availableVoices[Math.floor(Math.random() * availableVoices.length)];
+    utterance.voice = randomVoice;
+    
+    utterance.pitch = 0.6 + Math.random() * 0.8;
+    utterance.rate = 0.7 + Math.random() * 0.6;
+    utterance.volume = 0.6 + Math.random() * 0.3;
+    
+    if (Math.random() < 0.1) {
+        utterance.pitch = 0.3 + Math.random() * 1.4;
+        utterance.rate = 0.5 + Math.random() * 1.0;
     }
+    
+    const notificationText = `🎤 ${playerName} (${randomVoice.name.split(' ')[0]})`;
+    showNotification(notificationText, 2000);
+    
+    utterance.onerror = (event) => console.warn('🎤 Speech error:', event.error);
+    utterance.onstart = () => console.log(`🎤 Speaking: "${message}" in ${randomVoice.name} voice`);
+    
+    speechSynthesis.cancel();
+    speechSynthesis.speak(utterance);
+}
 
-    update(data) {
-        this.x = data.x || this.x;
-        this.y = data.y || this.y;
-        this.z = data.z || this.z;
-        this.rotationX = data.rotationX || this.rotationX;
-        this.rotationY = data.rotationY || this.rotationY;
-        this.radiationLevel = Math.min(100, (data.radiationLevel || this.radiationLevel));
-        this.lastUpdate = Date.now();
-    }
-
-    addScore(points, reason) {
-        this.score += points;
-        console.log(`💰 ${this.name} earned ${points} points for ${reason} (Total: ${this.score})`);
-    }
-
-    toJSON() {
-        return {
-            id: this.id,
-            name: this.name,
-            x: this.x,
-            y: this.y,
-            z: this.z,
-            rotationX: this.rotationX,
-            rotationY: this.rotationY,
-            color: this.color,
-            radiationLevel: this.radiationLevel,
-            score: this.score,
-            discoveries: this.discoveries,
-            rareItems: this.rareItems,
-            creatures: this.creatures,
-            resourcesStolen: this.resourcesStolen,
-            resourcesLost: this.resourcesLost
-        };
+function toggleChatTTS() {
+    chatTTSEnabled = !chatTTSEnabled;
+    if (chatTTSEnabled) {
+        showNotification('🎤 Chat voice enabled!', 2000);
+        addChatMessage('System', 'Chat voice enabled! Messages will be spoken aloud.');
+    } else {
+        showNotification('🔇 Chat voice disabled', 2000);
+        addChatMessage('System', 'Chat voice disabled.');
+        speechSynthesis.cancel();
     }
 }
 
-// World object class
-class WorldObject {
-    constructor(type, x, y, z) {
-        this.id = ++objectIdCounter;
-        this.type = type;
-        this.x = x;
-        this.y = y;
-        this.z = z;
-        this.available = true;
-        this.collectedBy = null;
-        this.collectedAt = null;
-        this.competingPlayers = []; // Players trying to collect this
-        
-        // Type-specific properties
-        if (type === 'exploding') {
-            this.hue = Math.random();
-        } else if (type === 'spaceCreature') {
-            this.tentacleCount = 3 + Math.floor(Math.random() * 5);
-            this.fleeSpeed = 0.7 + Math.random() * 0.2; // 🔧 Slower flee speed (0.7-0.9 vs player 1.0-2.0)
-            this.detectionRange = 80 + Math.random() * 40;
-            this.fleeing = false;
-            this.fleeDirection = { x: 0, y: 0, z: 0 };
-            this.lastTrajectoryUpdate = Date.now();
-        } else if (type === 'rare') {
-            this.fleeSpeed = 0.6; // 🔧 Rare entities also slower
-        }
-    }
-
-    // Check if object should respawn
-    checkRespawn() {
-        if (!this.available && this.collectedAt) {
-            const respawnTime = OBJECT_TYPES[this.type].respawnTime;
-            if (Date.now() - this.collectedAt > respawnTime) {
-                this.available = true;
-                this.collectedBy = null;
-                this.collectedAt = null;
-                this.competingPlayers = [];
-                console.log(`🔄 ${this.type} ${this.id} respawned at (${Math.round(this.x)}, ${Math.round(this.y)}, ${Math.round(this.z)})`);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    toJSON() {
-        return {
-            id: this.id,
-            type: this.type,
-            x: this.x,
-            y: this.y,
-            z: this.z,
-            available: this.available,
-            collectedBy: this.collectedBy,
-            hue: this.hue,
-            tentacleCount: this.tentacleCount,
-            competingPlayers: this.competingPlayers.length
-        };
-    }
+// ⚡ SPEED BOOST SYSTEM
+function triggerItemSpeedBoost() {
+    console.log('⚡ Item speed boost triggered!');
+    speedBoostEndTime = Date.now() + SPEED_SETTINGS.boostDuration;
+    
+    // Visual feedback
+    showNotification('⚡ SPEED BOOST!', 1000);
+    
+    // Sound feedback
+    playSpeedBoostSound();
 }
 
-// Generate initial world
-function generateWorld() {
-    console.log('🌍 Generating competitive world...');
-    worldObjects = [];
-    objectIdCounter = 0;
-
-    // Create discoveries
-    for (let i = 0; i < WORLD_SETTINGS.discoveries; i++) {
-        worldObjects.push(new WorldObject(
-            'discovery',
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize,
-            (Math.random() - 0.5) * 600,
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize
-        ));
-    }
-
-    // Create exploding creatures
-    for (let i = 0; i < WORLD_SETTINGS.explodingCreatures; i++) {
-        worldObjects.push(new WorldObject(
-            'exploding',
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize,
-            (Math.random() - 0.5) * 600,
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize
-        ));
-    }
-
-    // Create rare entities
-    for (let i = 0; i < WORLD_SETTINGS.rareEntities; i++) {
-        worldObjects.push(new WorldObject(
-            'rare',
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize,
-            (Math.random() - 0.5) * 600,
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize
-        ));
-    }
-
-    // Create space creatures
-    for (let i = 0; i < WORLD_SETTINGS.spaceCreatures; i++) {
-        worldObjects.push(new WorldObject(
-            'spaceCreature',
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize,
-            (Math.random() - 0.5) * 600,
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize
-        ));
-    }
-
-    // Create ring portals
-    for (let i = 0; i < WORLD_SETTINGS.ringPortals; i++) {
-        worldObjects.push(new WorldObject(
-            'ringPortal',
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize,
-            (Math.random() - 0.5) * 600,
-            (Math.random() - 0.5) * WORLD_SETTINGS.worldSize
-        ));
-    }
-
-    console.log(`✅ Generated world with ${worldObjects.length} objects`);
-}
-
-// Get nearby players for competition
-function getNearbyPlayers(excludeId, x, y, z, range = 1000) {
-    const nearby = [];
-    const excludedPlayerName = players[excludeId] ? players[excludeId].name : 'unknown';
-    
-    for (const [id, player] of Object.entries(players)) {
-        if (id === excludeId) continue;
-        
-        const distance = Math.sqrt(
-            Math.pow(player.x - x, 2) +
-            Math.pow(player.y - y, 2) +
-            Math.pow(player.z - z, 2)
-        );
-        
-        if (distance <= range) {
-            const playerData = player.toJSON();
-            playerData.distance = Math.round(distance);
-            nearby.push(playerData);
-        }
-    }
-    
-    return nearby;
-}
-
-// Get available world objects near player
-function getNearbyObjects(playerId, x, y, z, range = 1000) {
-    const nearby = [];
-    
-    worldObjects.forEach(obj => {
-        const distance = Math.sqrt(
-            Math.pow(obj.x - x, 2) +
-            Math.pow(obj.y - y, 2) +
-            Math.pow(obj.z - z, 2)
-        );
-        
-        if (distance <= range) {
-            const objData = obj.toJSON();
-            objData.distance = Math.round(distance);
-            nearby.push(objData);
-        }
-    });
-    
-    return nearby;
-}
-
-// Handle resource collection with competition
-function handleResourceCollection(playerId, objectId) {
-    const player = players[playerId];
-    const obj = worldObjects.find(o => o.id === objectId);
-    
-    if (!player || !obj || !obj.available) {
-        return { success: false, reason: 'Object not available' };
-    }
-
-    const distance = Math.sqrt(
-        Math.pow(obj.x - player.x, 2) +
-        Math.pow(obj.y - player.y, 2) +
-        Math.pow(obj.z - player.z, 2)
-    );
-
-    const collectRadius = OBJECT_TYPES[obj.type].collectRadius;
-    
-    if (distance > collectRadius) {
-        return { success: false, reason: 'Too far away' };
-    }
-
-    // Check for competing players
-    const competingPlayers = [];
-    for (const [id, otherPlayer] of Object.entries(players)) {
-        if (id === playerId) continue;
-        
-        const competitorDistance = Math.sqrt(
-            Math.pow(obj.x - otherPlayer.x, 2) +
-            Math.pow(obj.y - otherPlayer.y, 2) +
-            Math.pow(obj.z - otherPlayer.z, 2)
-        );
-        
-        if (competitorDistance <= WORLD_SETTINGS.stealRadius) {
-            competingPlayers.push({
-                player: otherPlayer,
-                distance: competitorDistance
-            });
-        }
-    }
-
-    // If multiple players competing, closest wins but others get notified
-    if (competingPlayers.length > 0) {
-        const closestCompetitor = competingPlayers.reduce((closest, current) => 
-            current.distance < closest.distance ? current : closest
-        );
-
-        if (closestCompetitor.distance < distance) {
-            // Another player is closer - they steal it!
-            const thief = closestCompetitor.player;
-            const points = OBJECT_TYPES[obj.type].points;
-            
-            // Award points to thief
-            thief.addScore(points, `stealing ${obj.type}`);
-            thief.resourcesStolen++;
-            
-            // Track theft for original player
-            player.resourcesLost++;
-            
-            // Mark object as collected
-            obj.available = false;
-            obj.collectedBy = thief.id;
-            obj.collectedAt = Date.now();
-
-            // Update player stats
-            if (obj.type === 'discovery') thief.discoveries++;
-            else if (obj.type === 'rare') thief.rareItems++;
-            else if (obj.type === 'spaceCreature') thief.creatures++;
-
-            // Broadcast the theft
-            io.emit('resource_stolen', {
-                objectId: obj.id,
-                objectType: obj.type,
-                thief: thief.name,
-                victim: player.name,
-                points: points,
-                position: { x: obj.x, y: obj.y, z: obj.z }
-            });
-
-            console.log(`🏴‍☠️ ${thief.name} stole ${obj.type} from ${player.name}! (+${points} points)`);
-            
-            return { 
-                success: false, 
-                reason: 'stolen',
-                stolenBy: thief.name,
-                thiefDistance: Math.round(closestCompetitor.distance),
-                yourDistance: Math.round(distance)
-            };
-        }
-    }
-
-    // Player successfully collects the resource
-    const points = OBJECT_TYPES[obj.type].points;
-    player.addScore(points, `collecting ${obj.type}`);
-    
-    // Mark object as collected
-    obj.available = false;
-    obj.collectedBy = playerId;
-    obj.collectedAt = Date.now();
-
-    // Update player stats
-    if (obj.type === 'discovery') player.discoveries++;
-    else if (obj.type === 'rare') player.rareItems++;
-    else if (obj.type === 'spaceCreature') player.creatures++;
-
-    // Special handling for portals (radiation reduction)
-    let radiationReduction = 0;
-    if (obj.type === 'ringPortal') {
-        radiationReduction = 25 + Math.random() * 15;
-        player.radiationLevel = Math.max(0, player.radiationLevel - radiationReduction);
-        
-        // Portals are consumed when used - mark as collected
-        obj.available = false;
-        obj.collectedBy = playerId;
-        obj.collectedAt = Date.now();
-    }
-
-    // Broadcast the collection
-    io.emit('resource_collected', {
-        objectId: obj.id,
-        objectType: obj.type,
-        collector: player.name,
-        points: points,
-        radiationReduction: radiationReduction,
-        position: { x: obj.x, y: obj.y, z: obj.z },
-        competitorCount: competingPlayers.length
-    });
-
-    console.log(`✅ ${player.name} collected ${obj.type} (+${points} points)${competingPlayers.length > 0 ? ` despite ${competingPlayers.length} competitors nearby!` : ''}`);
-    
-    return { 
-        success: true, 
-        points: points,
-        radiationReduction: radiationReduction,
-        competitorCount: competingPlayers.length
-    };
-}
-
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-    console.log(`🟢 Player connected: ${socket.id}`);
-    
-    // Create new player
-    const player = new Player(socket.id, socket);
-    players[socket.id] = player;
-    
-    console.log(`👤 ${player.name} joined at (${Math.round(player.x)}, ${Math.round(player.y)}, ${Math.round(player.z)})`);
-    console.log(`👥 Total players: ${Object.keys(players).length}`);
-    
-    // Send initial player data
-    socket.emit('player_init', {
-        id: player.id,
-        name: player.name,
-        x: player.x,
-        y: player.y,
-        z: player.z,
-        color: player.color
-    });
-    
-    // Send initial world state
-    socket.emit('world_sync', {
-        objects: worldObjects.map(obj => obj.toJSON())
-    });
-    
-    // Broadcast to all players that someone joined
-    io.emit('player_joined', {
-        name: player.name,
-        totalPlayers: Object.keys(players).length
-    });
-    
-    // Handle player movement and state updates
-    socket.on('player_update', (data) => {
-        const player = players[socket.id];
-        if (!player) return;
-        
-        player.update(data);
-        
-        // 📡 HÄUFIGERE WORLD STATE UPDATES für bessere Sync
-        // Nur alle 200ms statt bei jedem Update (weniger Server-Last aber trotzdem responsiv)
-        if (!player.lastBroadcast || Date.now() - player.lastBroadcast > 200) {
-            const nearbyPlayers = getNearbyPlayers(socket.id, player.x, player.y, player.z);
-            const nearbyObjects = getNearbyObjects(socket.id, player.x, player.y, player.z);
-            
-            // Send game state back to this player
-            socket.emit('game_state', {
-                players: nearbyPlayers,
-                objects: nearbyObjects,
-                totalPlayers: Object.keys(players).length,
-                yourStats: {
-                    score: player.score,
-                    discoveries: player.discoveries,
-                    rareItems: player.rareItems,
-                    creatures: player.creatures,
-                    radiationLevel: player.radiationLevel,
-                    resourcesStolen: player.resourcesStolen,
-                    resourcesLost: player.resourcesLost
-                }
-            });
-            
-            player.lastBroadcast = Date.now();
-        }
-    });
-    
-    // Handle resource collection attempts with immediate broadcast
-    socket.on('collect_resource', (data) => {
-        const player = players[socket.id];
-        const obj = worldObjects.find(o => o.id === data.objectId);
-        
-        if (!player || !obj) {
-            console.log(`❌ Collection failed: ${!player ? 'No player' : 'No object'}`);
-            return;
-        }
-        
-        console.log(`🎯 ${player.name} attempting to collect ${obj.type} (ID: ${data.objectId})`);
-        
-        // Immediate server-side collection processing
-        const result = handleResourceCollection(socket.id, data.objectId);
-        
-        if (result.success) {
-            console.log(`✅ ${player.name} successfully collected ${obj.type} - broadcasting to all players`);
-            
-            // 📢 SOFORT an ALLE Spieler senden (einschließlich dem Sammler für Bestätigung)
-            io.emit('object_removed', {
-                objectId: data.objectId,
-                objectType: obj.type,
-                collectedBy: player.name,
-                collectorId: socket.id,
-                points: data.points || 10,
-                timestamp: Date.now()
-            });
-            
-            // Competitive features
-            if (result.competitorCount > 0) {
-                socket.emit('collection_result', { 
-                    success: true, 
-                    competitorCount: result.competitorCount,
-                    message: `Beat ${result.competitorCount} competitors!`
-                });
-            }
-            
-        } else if (result.reason === 'stolen') {
-            console.log(`🏴‍☠️ ${player.name}'s collection was stolen by ${result.stolenBy}`);
-            socket.emit('collection_result', result);
-        }
-        
-        // 📊 Broadcast updated world state immediately after any collection
-        setTimeout(() => {
-            broadcastWorldState();
-        }, 100);
-    });
-    
-    // Handle creature trajectory updates from clients
-    socket.on('creature_trajectory', (data) => {
-        const obj = worldObjects.find(o => o.id === data.objectId);
-        const player = players[socket.id];
-        
-        if (obj && player && obj.available) {
-            // Update creature position on server with trajectory
-            obj.x = data.startPosition.x;
-            obj.y = data.startPosition.y;
-            obj.z = data.startPosition.z;
-            obj.fleeing = data.fleeing;
-            obj.fleeDirection = data.fleeDirection;
-            obj.lastTrajectoryUpdate = data.timestamp;
-            
-            // Broadcast trajectory to other nearby players
-            const nearbyPlayers = getNearbyPlayers(socket.id, player.x, player.y, player.z, 800);
-            nearbyPlayers.forEach(nearbyPlayer => {
-                const targetPlayer = players[nearbyPlayer.id];
-                if (targetPlayer && targetPlayer.socket) {
-                    targetPlayer.socket.emit('creature_trajectory', {
-                        objectId: data.objectId,
-                        startPosition: data.startPosition,
-                        fleeDirection: data.fleeDirection,
-                        fleeSpeed: data.fleeSpeed,
-                        timestamp: data.timestamp,
-                        fleeing: data.fleeing
-                    });
-                }
-            });
-            
-            console.log(`🎯 ${obj.type} ${obj.id} trajectory updated by ${player.name} - broadcast to ${nearbyPlayers.length} players`);
-        }
-    });
-    
-    // Handle chat messages
-    socket.on('chat_message', (data) => {
-        const player = players[socket.id];
-        if (!player || !data.message) return;
-        
-        console.log(`💬 ${player.name}: "${data.message}"`);
-        
-        // Broadcast to all players
-        io.emit('chat_message', {
-            playerId: player.id,
-            playerName: player.name,
-            message: data.message,
-            timestamp: Date.now()
-        });
-    });
-    
-    // Handle disconnect
-    socket.on('disconnect', () => {
-        const player = players[socket.id];
-        console.log(`🔴 Player disconnected: ${socket.id}`);
-        
-        if (player) {
-            console.log(`👋 ${player.name} left the game`);
-            
-            // Broadcast to remaining players
-            socket.broadcast.emit('player_left', {
-                name: player.name,
-                totalPlayers: Object.keys(players).length - 1
-            });
-            
-            delete players[socket.id];
-        }
-        
-        console.log(`👥 Total players: ${Object.keys(players).length}`);
-    });
-});
-
-// World management loop - handle respawns and cleanup
-setInterval(() => {
-    let respawnCount = 0;
-    
-    // Check for object respawns
-    worldObjects.forEach(obj => {
-        if (obj.checkRespawn()) {
-            respawnCount++;
-        }
-    });
-    
-    if (respawnCount > 0) {
-        console.log(`🔄 Respawned ${respawnCount} objects`);
-        // Broadcast world sync to all players
-        io.emit('world_sync', {
-            objects: worldObjects.map(obj => obj.toJSON())
-        });
-    }
-    
-    // Clean up inactive players
+function updateSpeedMultiplier() {
     const now = Date.now();
-    const timeout = 60000; // 1 minute timeout
     
-    for (const [id, player] of Object.entries(players)) {
-        if (now - player.lastUpdate > timeout) {
-            console.log(`🧹 Removing inactive player: ${player.name}`);
-            delete players[id];
-        }
+    // Base speed from score (continuous bonus)
+    const scoreBonus = Math.min(score * SPEED_SETTINGS.scoreSpeedBonus, SPEED_SETTINGS.maxScoreSpeed - SPEED_SETTINGS.baseSpeed);
+    
+    // Temporary item boost
+    let itemBoost = 0;
+    if (now < speedBoostEndTime) {
+        const remaining = (speedBoostEndTime - now) / SPEED_SETTINGS.boostDuration;
+        itemBoost = (SPEED_SETTINGS.boostSpeed - SPEED_SETTINGS.baseSpeed) * remaining;
     }
-}, 5000); // Check every 5 seconds
-
-// Generate leaderboard
-function getLeaderboard() {
-    const sortedPlayers = Object.values(players)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 10)
-        .map((player, index) => ({
-            rank: index + 1,
-            name: player.name,
-            score: player.score,
-            discoveries: player.discoveries,
-            rareItems: player.rareItems,
-            creatures: player.creatures,
-            resourcesStolen: player.resourcesStolen,
-            resourcesLost: player.resourcesLost,
-            survivalTime: Math.floor((Date.now() - player.joinTime) / 1000)
-        }));
     
-    return sortedPlayers;
+    currentSpeedMultiplier = SPEED_SETTINGS.baseSpeed + scoreBonus + itemBoost;
+    
+    // Update HUD with speed info
+    updateSpeedDisplay();
 }
 
-// Broadcast leaderboard updates
-setInterval(() => {
-    if (Object.keys(players).length > 0) {
-        const leaderboard = getLeaderboard();
-        io.emit('leaderboard_update', { leaderboard });
+function updateSpeedDisplay() {
+    // Add speed indicator to HUD (we'll update the HUD display later)
+    const speedPercent = Math.round((currentSpeedMultiplier / SPEED_SETTINGS.baseSpeed - 1) * 100);
+    if (speedPercent > 0) {
+        document.getElementById('speed-indicator').textContent = `+${speedPercent}% Speed`;
+        document.getElementById('speed-indicator').style.display = 'block';
+    } else {
+        document.getElementById('speed-indicator').style.display = 'none';
     }
-}, 30000); // Every 30 seconds
+}
 
-// Initialize world
-generateWorld();
+// 💀 PROXIMITY KILL SYSTEM
+function checkProximityKill() {
+    if (!otherPlayers || otherPlayers.size === 0) {
+        if (isInProximityDanger) {
+            stopProximityKill();
+        }
+        return;
+    }
+    
+    let nearestPlayer = null;
+    let nearestDistance = Infinity;
+    
+    // Find nearest player within kill range
+    for (const [id, playerObj] of otherPlayers) {
+        const distance = new THREE.Vector3(player.x, player.y, player.z).distanceTo(playerObj.mesh.position);
+        if (distance < 30 && distance < nearestDistance) { // 30 unit proximity kill range
+            nearestDistance = distance;
+            nearestPlayer = playerObj;
+        }
+    }
+    
+    if (nearestPlayer && !isInProximityDanger) {
+        startProximityKill(nearestPlayer);
+    } else if (!nearestPlayer && isInProximityDanger) {
+        stopProximityKill();
+    } else if (nearestPlayer && isInProximityDanger) {
+        updateProximityKill(nearestPlayer, nearestDistance);
+    }
+}
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Competitive Ethereal Exploration server running on port ${PORT}`);
-    console.log(`🌐 Server ready for competitive multiplayer`);
-    console.log(`🔧 World settings: ${WORLD_SETTINGS.discoveries + WORLD_SETTINGS.explodingCreatures + WORLD_SETTINGS.rareEntities + WORLD_SETTINGS.spaceCreatures + WORLD_SETTINGS.ringPortals} total objects`);
-    console.log(`🏴‍☠️ Steal radius: ${WORLD_SETTINGS.stealRadius}m`);
-    console.log(`🔄 Respawn times: Discovery(30s), Rare(2m), Portal(3m)`);
-});
+function startProximityKill(targetPlayer) {
+    console.log('💀 Proximity kill started with', targetPlayer.data.name);
+    isInProximityDanger = true;
+    proximityTarget = targetPlayer;
+    proximityKillStartTime = Date.now();
+    
+    // Start countdown timer
+    proximityKillTimer = setTimeout(() => {
+        executeProximityKill();
+    }, SPEED_SETTINGS.proximityKillTime);
+    
+    // Start ominous sound
+    startProximityWarningSound();
+    
+    // Visual feedback
+    showProximityCountdown();
+    
+    // Chat notification
+    addChatMessage('System', `💀 PROXIMITY DANGER: ${targetPlayer.data.name} nearby! 6 seconds to escape!`);
+}
+
+function stopProximityKill() {
+    console.log('✅ Proximity kill stopped - players separated');
+    isInProximityDanger = false;
+    proximityTarget = null;
+    
+    if (proximityKillTimer) {
+        clearTimeout(proximityKillTimer);
+        proximityKillTimer = null;
+    }
+    
+    stopProximityWarningSound();
+    hideProximityCountdown();
+    
+    addChatMessage('System', '✅ Safe distance restored');
+}
+
+function updateProximityKill(targetPlayer, distance) {
+    // Update countdown display
+    const elapsed = Date.now() - proximityKillStartTime;
+    const remaining = Math.max(0, SPEED_SETTINGS.proximityKillTime - elapsed);
+    const seconds = Math.ceil(remaining / 1000);
+    
+    updateProximityCountdownDisplay(seconds, targetPlayer.data.name, Math.round(distance));
+}
+
+function executeProximityKill() {
+    if (!proximityTarget) return;
+    
+    console.log('💀 Executing proximity kill!');
+    
+    // Determine who dies based on radiation level
+    const myRadiation = radiationLevel;
+    const theirRadiation = proximityTarget.data.radiationLevel || 0;
+    
+    if (myRadiation >= theirRadiation) {
+        // I die
+        triggerProximityDeath(proximityTarget.data.name);
+    } else {
+        // They die (we just show notification)
+        showNotification(`💀 ${proximityTarget.data.name} died from proximity radiation!`, 5000);
+        addChatMessage('System', `💀 ${proximityTarget.data.name} succumbed to radiation exposure`);
+        playVictorySound();
+    }
+    
+    stopProximityKill();
+}
+
+function triggerProximityDeath(killerName) {
+    gameStarted = false;
+    
+    // Calculate final score
+    const finalSurvivalScore = Math.floor(survivalTime / 1000) * POINTS.survivalBonus;
+    score = discoveries * POINTS.discovery + 
+           rareItems * POINTS.rareEntity + 
+           creaturesFound * POINTS.spaceCreature + 
+           finalSurvivalScore;
+    
+    // Save score
+    saveScore();
+    
+    // Show death screen with killer info
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('finalDiscoveries').textContent = discoveries;
+    document.getElementById('finalRare').textContent = rareItems;
+    document.getElementById('finalCreatures').textContent = creaturesFound;
+    
+    // Update death title
+    document.querySelector('.death-title').textContent = 'PROXIMITY KILL';
+    document.querySelector('.death-title').style.color = '#ff6b00';
+    
+    // Add killer info
+    const deathScreen = document.getElementById('deathScreen');
+    const killerInfo = document.createElement('div');
+    killerInfo.innerHTML = `<h2 style="color: #ff6b00; margin: 20px 0;">Killed by: ${killerName}</h2>`;
+    deathScreen.insertBefore(killerInfo, deathScreen.querySelector('.current-score'));
+    
+    playDeathSound();
+    document.getElementById('deathScreen').style.display = 'flex';
+    
+    // Notify chat
+    if (socket && socket.connected) {
+        addChatMessage('System', `💀 You were killed by ${killerName} in proximity combat!`);
+    }
+}
+
+// 🔊 PROXIMITY SOUND SYSTEM
+function startProximityWarningSound() {
+    if (!audioContext) return;
+    
+    try {
+        // Create ominous heartbeat-like sound
+        const createHeartbeat = () => {
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            const filter = audioContext.createBiquadFilter();
+            
+            osc.frequency.setValueAtTime(40, audioContext.currentTime);
+            osc.type = 'sine';
+            
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(200, audioContext.currentTime);
+            
+            gain.gain.setValueAtTime(0, audioContext.currentTime);
+            gain.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + 0.1);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.8);
+            
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(masterGain);
+            
+            osc.start();
+            osc.stop(audioContext.currentTime + 0.8);
+        };
+        
+        // Create recurring heartbeat
+        proximityWarningSound = setInterval(createHeartbeat, 1000); // Every second
+        createHeartbeat(); // Start immediately
+        
+    } catch (e) {
+        console.warn('Proximity sound error:', e);
+    }
+}
+
+function stopProximityWarningSound() {
+    if (proximityWarningSound) {
+        clearInterval(proximityWarningSound);
+        proximityWarningSound = null;
+    }
+}
+
+function playSpeedBoostSound() {
+    if (!audioContext) return;
+    
+    try {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        
+        osc.frequency.setValueAtTime(440, audioContext.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.3);
+        osc.type = 'triangle';
+        
+        gain.gain.setValueAtTime(0, audioContext.currentTime);
+        gain.gain.linearRampToValueAtTime(0.2, audioContext.currentTime + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+        
+        osc.connect(gain);
+        gain.connect(masterGain);
+        
+        osc.start();
+        osc.stop(audioContext.currentTime + 0.5);
+    } catch (e) {
+        console.warn('Speed boost sound error:', e);
+    }
+}
+
+function playVictorySound() {
+    if (!audioContext) return;
+    
+    try {
+        const frequencies = [523, 659, 784, 1047]; // C, E, G, C
+        frequencies.forEach((freq, i) => {
+            setTimeout(() => {
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                
+                osc.frequency.setValueAtTime(freq, audioContext.currentTime);
+                osc.type = 'triangle';
+                
+                gain.gain.setValueAtTime(0, audioContext.currentTime);
+                gain.gain.linearRampToValueAtTime(0.15, audioContext.currentTime + 0.1);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.6);
+                
+                osc.connect(gain);
+                gain.connect(masterGain);
+                
+                osc.start();
+                osc.stop(audioContext.currentTime + 0.6);
+            }, i * 150);
+        });
+    } catch (e) {
+        console.warn('Victory sound error:', e);
+    }
+}
+
+// 🎯 PLAYER TRACKING SYSTEM
+function createPlayerDirectionIndicators() {
+    // Create indicators at screen edges pointing to other players
+    const indicators = document.getElementById('player-indicators');
+    if (!indicators) {
+        const indicatorContainer = document.createElement('div');
+        indicatorContainer.id = 'player-indicators';
+        indicatorContainer.style.cssText = `
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 90;
+        `;
+        document.body.appendChild(indicatorContainer);
+    }
+}
+
+function updatePlayerDirectionIndicators() {
+    const container = document.getElementById('player-indicators');
+    if (!container) return;
+    
+    // Clear existing indicators
+    container.innerHTML = '';
+    
+    // Create indicators for each other player
+    for (const [id, playerObj] of otherPlayers) {
+        const playerPos = playerObj.mesh.position;
+        const myPos = new THREE.Vector3(player.x, player.y, player.z);
+        const distance = myPos.distanceTo(playerPos);
+        
+        // Calculate direction vector
+        const direction = new THREE.Vector3().subVectors(playerPos, myPos).normalize();
+        
+        // Convert to screen coordinates
+        const screenPos = worldToScreen(playerPos);
+        
+        // If player is off-screen, create edge indicator
+        if (screenPos.x < 0 || screenPos.x > window.innerWidth || 
+            screenPos.y < 0 || screenPos.y > window.innerHeight) {
+            
+            createEdgeIndicator(container, direction, playerObj.data, distance);
+        }
+    }
+}
+
+function worldToScreen(worldPos) {
+    const vector = worldPos.clone();
+    vector.project(camera);
+    
+    const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (vector.y * -0.5 + 0.5) * window.innerHeight;
+    
+    return { x, y };
+}
+
+function createEdgeIndicator(container, direction, playerData, distance) {
+    const indicator = document.createElement('div');
+    
+    // Calculate edge position
+    const margin = 50;
+    let x, y;
+    
+    if (Math.abs(direction.x) > Math.abs(direction.z)) {
+        // Place on left/right edge
+        x = direction.x > 0 ? window.innerWidth - margin : margin;
+        y = window.innerHeight / 2 + direction.z * (window.innerHeight / 4);
+    } else {
+        // Place on top/bottom edge
+        y = direction.z > 0 ? window.innerHeight - margin : margin;
+        x = window.innerWidth / 2 + direction.x * (window.innerWidth / 4);
+    }
+    
+    // Clamp to screen bounds
+    x = Math.max(margin, Math.min(window.innerWidth - margin, x));
+    y = Math.max(margin, Math.min(window.innerHeight - margin, y));
+    
+    // Calculate rotation angle
+    const angle = Math.atan2(direction.z, direction.x) * 180 / Math.PI;
+    
+    indicator.style.cssText = `
+        position: absolute;
+        left: ${x}px;
+        top: ${y}px;
+        width: 40px;
+        height: 40px;
+        background: linear-gradient(45deg, #${playerData.color.toString(16).padStart(6, '0')}, #ffffff);
+        border: 2px solid #ffffff;
+        border-radius: 50%;
+        transform: translate(-50%, -50%) rotate(${angle}deg);
+        box-shadow: 0 0 10px rgba(255,255,255,0.5);
+        z-index: 91;
+    `;
+    
+    // Add arrow pointer
+    const arrow = document.createElement('div');
+    arrow.style.cssText = `
+        position: absolute;
+        right: -5px;
+        top: 50%;
+        width: 0;
+        height: 0;
+        border-left: 8px solid #ffffff;
+        border-top: 5px solid transparent;
+        border-bottom: 5px solid transparent;
+        transform: translateY(-50%);
+    `;
+    indicator.appendChild(arrow);
+    
+    // Add distance text
+    const distanceText = document.createElement('div');
+    distanceText.textContent = Math.round(distance) + 'm';
+    distanceText.style.cssText = `
+        position: absolute;
+        top: -25px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: bold;
+        text-shadow: 0 0 4px rgba(0,0,0,0.8);
+        white-space: nowrap;
+    `;
+    indicator.appendChild(distanceText);
+    
+    container.appendChild(indicator);
+}
